@@ -1,3 +1,23 @@
+import type { LucideIcon } from "lucide-react";
+import {
+  Bell,
+  Building2,
+  Check,
+  ChevronDown,
+  CircleDollarSign,
+  ExternalLink,
+  FileCheck2,
+  Home,
+  Landmark,
+  LockKeyhole,
+  Menu,
+  ReceiptText,
+  ShieldCheck,
+  Sparkles,
+  TrendingUp,
+  WalletCards,
+  X
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import type { PublicAdvance } from "../domain/public";
 import type { AdvanceRequest } from "../domain/schemas";
@@ -19,27 +39,51 @@ const initialForm: FormState = {
   term: "30"
 };
 
-function Icon({ name }: { name: "shield" | "market" | "lock" | "ledger" | "check" }) {
-  const paths = {
-    shield: <path d="M12 3 5 6v5c0 4.6 2.8 7.9 7 10 4.2-2.1 7-5.4 7-10V6l-7-3Z" />,
-    market: <path d="M4 18V6m0 12h16M7 14l4-4 3 2 5-6m0 0h-4m4 0v4" />,
-    lock: (
-      <>
-        <rect x="5" y="10" width="14" height="10" rx="2" />
-        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-      </>
-    ),
-    ledger: (
-      <>
-        <path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4" />
-      </>
-    ),
-    check: <path d="m5 12 4 4L19 6" />
-  };
+const navItems: Array<{ label: string; href: string; icon: LucideIcon }> = [
+  { label: "Home", href: "#overview", icon: Home },
+  { label: "Equity", href: "#equity", icon: WalletCards },
+  { label: "Evidence", href: "#evidence", icon: ShieldCheck },
+  { label: "Advance", href: "#advance", icon: CircleDollarSign },
+  { label: "Receipts", href: "#receipt", icon: ReceiptText }
+];
+
+function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      {paths[name]}
-    </svg>
+    <>
+      <nav className="primary-nav" aria-label="Main navigation">
+        {navItems.map(({ label, href, icon: NavIcon }, index) => (
+          <a
+            className={index === 0 ? "is-current" : ""}
+            href={href}
+            key={label}
+            onClick={onNavigate}
+          >
+            <NavIcon aria-hidden="true" size={20} strokeWidth={1.7} />
+            <span>{label}</span>
+            {label === "Equity" || label === "Advance" ? (
+              <ChevronDown aria-hidden="true" className="nav-chevron" size={16} />
+            ) : null}
+          </a>
+        ))}
+      </nav>
+      <div className="sidebar-bottom">
+        <div className="network-card">
+          <span className="network-dot" />
+          <div>
+            <strong>Hedera Testnet</strong>
+            <span>Network status: healthy</span>
+          </div>
+        </div>
+        <button className="profile-button" type="button">
+          <span className="avatar">D</span>
+          <span>
+            <strong>Dmitry</strong>
+            <small>Synthetic profile</small>
+          </span>
+          <ChevronDown aria-hidden="true" size={16} />
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -64,11 +108,11 @@ function Field({
       <span className="control">
         <span className="control-prefix">{prefix}</span>
         <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          inputMode={inputMode}
           autoComplete="off"
+          inputMode={inputMode}
+          onChange={(event) => onChange(event.target.value)}
           required
+          value={value}
         />
       </span>
       <span className="field-help">{help}</span>
@@ -77,15 +121,13 @@ function Field({
 }
 
 function EvidenceStep({
-  number,
-  icon,
+  icon: StepIcon,
   title,
   status,
   rows,
   active
 }: {
-  number: number;
-  icon: "market" | "lock" | "ledger";
+  icon: LucideIcon;
   title: string;
   status: string;
   rows: Array<[string, string]>;
@@ -93,30 +135,33 @@ function EvidenceStep({
 }) {
   return (
     <section className={`evidence-step ${active ? "is-active" : ""}`}>
-      <div className="step-number">{number}</div>
-      <div className="evidence-body">
-        <div className="evidence-heading">
-          <span className="evidence-icon">
-            <Icon name={icon} />
-          </span>
-          <h2>{title}</h2>
+      <div className="evidence-heading">
+        <span className="evidence-icon">
+          <StepIcon aria-hidden="true" size={19} strokeWidth={1.8} />
+        </span>
+        <div>
+          <h3>{title}</h3>
           <span className="status">{status}</span>
         </div>
-        <dl>
-          {rows.map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
       </div>
+      <dl>
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd title={value}>{value}</dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 }
 
 const usd = (minor: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(minor / 100);
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0
+  }).format(minor / 100);
 
 function buildInput(form: FormState): AdvanceRequest {
   const id = crypto.randomUUID().replaceAll("-", "");
@@ -152,6 +197,8 @@ export function App() {
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState<"evaluate" | "fund" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const graphAge = useMemo(() => {
     if (!advance) return "Awaiting evaluation";
     return `${Math.max(0, Math.floor(Date.now() / 1000) - advance.market.indexedBlockTimestamp)}s ago`;
@@ -188,210 +235,419 @@ export function App() {
 
   const demo = advance?.mode !== "live";
   const funded = advance?.state === "FUNDED";
+  const authorized = advance?.state === "AUTHORIZED";
+  const verifiedCount = funded ? 4 : authorized ? 3 : advance ? 2 : 1;
+
   return (
-    <div className="app">
-      <header>
-        <a className="brand" href="/" aria-label="unlockd.bond home">
+    <div className="product-shell">
+      <aside className="sidebar" aria-label="Main navigation">
+        <a className="brand" href="#overview" aria-label="unlockd.bond home">
           unlockd.bond
         </a>
-        <div className="header-meta">
-          <a href="#receipt">Receipts</a>
-          <span className="environment">
-            <span />
-            Testnet
-          </span>
-        </div>
-      </header>
+        <Navigation />
+      </aside>
 
-      <main>
-        <form className="application" onSubmit={evaluate}>
-          <div className="intro">
-            <h1>Request an advance</h1>
-            <p>Private inputs stay offchain. Public receipts contain commitments only.</p>
+      <div className="workspace">
+        <header className="topbar">
+          <div className="mobile-brand-row">
+            <a className="brand mobile-brand" href="#overview">
+              unlockd.bond
+            </a>
+            <button
+              aria-expanded={menuOpen}
+              aria-label="Open menu"
+              className="icon-button menu-button"
+              onClick={() => setMenuOpen(true)}
+              type="button"
+            >
+              <Menu aria-hidden="true" size={23} />
+            </button>
           </div>
-          <Field
-            label="Hedera account"
-            prefix="0.0"
-            value={form.account.replace(/^0\.0\./, "")}
-            onChange={(value) => setForm({ ...form, account: `0.0.${value.replace(/\D/g, "")}` })}
-            help="The public testnet account that receives the bounded payment."
-            inputMode="text"
-          />
-          <Field
-            label="Monthly net income"
-            prefix="USD"
-            value={form.income}
-            onChange={(value) => setForm({ ...form, income: value })}
-            help="Synthetic monthly take-home pay."
-          />
-          <Field
-            label="Vested AAPL RSUs"
-            prefix="AAPL"
-            value={form.units}
-            onChange={(value) => setForm({ ...form, units: value })}
-            help="Vested units only. Unvested units are excluded."
-          />
-          <Field
-            label="Requested amount"
-            prefix="USD"
-            value={form.amount}
-            onChange={(value) => setForm({ ...form, amount: value })}
-            help="The simulated amount you would like to access."
-          />
-          <label className="field">
-            <span className="field-label">Term</span>
-            <span className="control">
-              <span className="control-prefix">Days</span>
-              <select
-                value={form.term}
-                onChange={(event) =>
-                  setForm({ ...form, term: event.target.value as FormState["term"] })
-                }
-              >
-                <option value="14">14 days</option>
-                <option value="30">30 days</option>
-                <option value="45">45 days</option>
-              </select>
-            </span>
-            <span className="field-help">
-              Short, bounded testnet term. No repayment is collected.
-            </span>
-          </label>
-
-          <div className="synthetic-notice">
-            <Icon name="shield" />
-            <div>
-              <strong>Synthetic profile</strong>
-              <span>Testnet data and test tokens only.</span>
-            </div>
-            <em>Not legal collateral</em>
+          <div className="breadcrumb">
+            <span>Home</span>
+            <span className="breadcrumb-separator">/</span>
+            <strong>Advance workspace</strong>
           </div>
-          {error && (
-            <div className="error" role="alert">
-              {error.replaceAll("_", " ")}
-            </div>
-          )}
-          <button type="submit" className="primary" disabled={busy !== null}>
-            <Icon name="lock" />
-            {busy === "evaluate" ? "Evaluating…" : "Evaluate privately"}
+          <button aria-label="Notifications" className="icon-button" type="button">
+            <Bell aria-hidden="true" size={21} strokeWidth={1.6} />
           </button>
-          <p className="privacy-footnote">
-            Raw employee inputs are processed transiently and are never written to public receipts.
-          </p>
-        </form>
+        </header>
 
-        <aside className="evidence" aria-label="Evidence chain">
-          <p className="rail-label">Evidence chain</p>
-          <div className="rail">
-            <EvidenceStep
-              number={1}
-              icon="market"
-              title="Market evidence"
-              status={advance ? (demo ? "Simulated" : "Verified") : "Waiting"}
-              active={Boolean(advance)}
-              rows={[
-                ["Graph block", advance ? advance.market.indexedBlock.toLocaleString() : "—"],
-                ["Freshness", graphAge],
-                ["Deployment", advance?.market.subgraphDeployment ?? "—"]
-              ]}
+        {menuOpen ? (
+          <div className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation">
+            <button
+              aria-label="Close menu"
+              className="drawer-scrim"
+              onClick={() => setMenuOpen(false)}
+              type="button"
             />
-            <EvidenceStep
-              number={2}
-              icon="lock"
-              title="Private risk"
-              status={
-                advance
-                  ? advance.riskReceipt.teeVerified
-                    ? "TEE verified"
-                    : "Simulated"
-                  : "Waiting"
-              }
-              active={Boolean(advance)}
-              rows={[
-                ["Trust mode", advance?.riskReceipt.trustMode ?? "—"],
-                ["Model", advance?.riskReceipt.model ?? "—"],
-                ["Policy cap", advance ? usd(advance.authorization.policyMaxMinor) : "—"]
-              ]}
-            />
-            <EvidenceStep
-              number={3}
-              icon="ledger"
-              title="Bounded payment"
-              status={funded ? (demo ? "Simulated" : "Confirmed") : advance ? "Ready" : "Waiting"}
-              active={Boolean(advance)}
-              rows={[
-                ["Hedera payment", funded ? "Consensus receipt" : "Pending confirmation"],
-                ["Advance Note", funded ? `#${advance.funding?.noteSerial}` : "Ready to mint"],
-                ["HCS record", funded ? `#${advance.funding?.hcsSequenceNumber}` : "Ready"]
-              ]}
-            />
+            <aside>
+              <div className="drawer-heading">
+                <button
+                  className="brand drawer-brand"
+                  onClick={() => setMenuOpen(false)}
+                  type="button"
+                >
+                  unlockd.bond
+                </button>
+                <button
+                  aria-label="Close menu"
+                  className="icon-button"
+                  onClick={() => setMenuOpen(false)}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={22} />
+                </button>
+              </div>
+              <Navigation onNavigate={() => setMenuOpen(false)} />
+            </aside>
+          </div>
+        ) : null}
+
+        <main className="content" id="overview">
+          <section className="assistant-hero" aria-labelledby="workspace-title">
+            <p className="eyebrow">Private, equity-aware salary advances</p>
+            <h1 id="workspace-title">Unlock value from vested equity</h1>
+            <p>
+              Verify public market evidence, assess repayment privately, and settle a bounded
+              advance on Hedera Testnet.
+            </p>
+            <nav className="quick-actions" aria-label="Quick actions">
+              <a href="#advance">
+                <CircleDollarSign aria-hidden="true" size={18} />
+                Request an advance
+              </a>
+              <a href="#evidence">
+                <ShieldCheck aria-hidden="true" size={18} />
+                Review evidence
+              </a>
+              <a href="#receipt">
+                <ReceiptText aria-hidden="true" size={18} />
+                View receipts
+              </a>
+            </nav>
+          </section>
+
+          <section className="dashboard-section" id="equity">
+            <div className="section-heading">
+              <div>
+                <p className="section-kicker">Equity overview</p>
+                <h2>Your vested position</h2>
+              </div>
+              <a href="#advance">Update details</a>
+            </div>
+
+            <div className="equity-grid">
+              <article className="metric-card total-card">
+                <span className="card-label">Eligible equity</span>
+                <strong>120</strong>
+                <span className="metric-unit">vested RSUs</span>
+                <div className="metric-status">
+                  <TrendingUp aria-hidden="true" size={16} />
+                  Public market evidence available
+                </div>
+              </article>
+
+              <article className="metric-card company-card">
+                <div className="company-mark">
+                  <img alt="Apple" src="/assets/apple-logo.jpg" />
+                </div>
+                <div>
+                  <span className="card-label">Apple Inc.</span>
+                  <strong>AAPL</strong>
+                  <span>RSU · 120 vested</span>
+                </div>
+                <span className="eligibility-badge">
+                  <Check aria-hidden="true" size={14} />
+                  Eligible
+                </span>
+              </article>
+
+              <article className="metric-card readiness-card">
+                <span className="card-label">Funding readiness</span>
+                <strong>{verifiedCount} of 4</strong>
+                <div
+                  aria-label={`${verifiedCount} of 4 checks complete`}
+                  aria-valuemax={4}
+                  aria-valuemin={0}
+                  aria-valuenow={verifiedCount}
+                  className="readiness-track"
+                  role="progressbar"
+                >
+                  {["equity", "market", "risk", "funding"].map((key, index) => (
+                    <span className={index < verifiedCount ? "complete" : ""} key={key} />
+                  ))}
+                </div>
+                <a href="#advance">{advance ? "Continue review" : "Start evaluation"}</a>
+              </article>
+            </div>
+          </section>
+
+          <div className="flow-grid">
+            <form className="application panel" id="advance" onSubmit={evaluate}>
+              <div className="panel-heading">
+                <div>
+                  <p className="section-kicker">Advance request</p>
+                  <h2>Evaluate your request</h2>
+                </div>
+                <span className="private-badge">
+                  <LockKeyhole aria-hidden="true" size={14} />
+                  Private
+                </span>
+              </div>
+
+              <p className="panel-copy">
+                Your salary and grant inputs stay offchain. Only commitments and settlement receipts
+                are public.
+              </p>
+
+              <div className="form-grid">
+                <Field
+                  help="Testnet account receiving the bounded payment."
+                  inputMode="text"
+                  label="Hedera account"
+                  onChange={(value) =>
+                    setForm({ ...form, account: `0.0.${value.replace(/\D/g, "")}` })
+                  }
+                  prefix="0.0"
+                  value={form.account.replace(/^0\.0\./, "")}
+                />
+                <Field
+                  help="Synthetic monthly take-home pay."
+                  label="Monthly net income"
+                  onChange={(value) => setForm({ ...form, income: value })}
+                  prefix="USD"
+                  value={form.income}
+                />
+                <Field
+                  help="Vested units only; unvested units are excluded."
+                  label="Vested AAPL RSUs"
+                  onChange={(value) => setForm({ ...form, units: value })}
+                  prefix="AAPL"
+                  value={form.units}
+                />
+                <Field
+                  help="Simulated amount you would like to access."
+                  label="Requested amount"
+                  onChange={(value) => setForm({ ...form, amount: value })}
+                  prefix="USD"
+                  value={form.amount}
+                />
+                <label className="field">
+                  <span className="field-label">Term</span>
+                  <span className="control">
+                    <span className="control-prefix">Days</span>
+                    <select
+                      onChange={(event) =>
+                        setForm({ ...form, term: event.target.value as FormState["term"] })
+                      }
+                      value={form.term}
+                    >
+                      <option value="14">14 days</option>
+                      <option value="30">30 days</option>
+                      <option value="45">45 days</option>
+                    </select>
+                  </span>
+                  <span className="field-help">
+                    Bounded testnet term; no repayment is collected.
+                  </span>
+                </label>
+              </div>
+
+              <div className="synthetic-notice">
+                <ShieldCheck aria-hidden="true" size={20} />
+                <div>
+                  <strong>Synthetic profile · Test tokens only</strong>
+                  <span>This experience creates no legal collateral.</span>
+                </div>
+                <em>Testnet</em>
+              </div>
+
+              {error ? (
+                <div className="error" role="alert">
+                  {error.replaceAll("_", " ")}
+                </div>
+              ) : null}
+
+              <button className="primary" disabled={busy !== null} type="submit">
+                <Sparkles aria-hidden="true" size={18} />
+                {busy === "evaluate" ? "Evaluating privately…" : "Evaluate privately"}
+              </button>
+              <p className="privacy-footnote">
+                Raw employee inputs are processed transiently and never written to public receipts.
+              </p>
+            </form>
+
+            <aside className="evidence panel" id="evidence" aria-label="Evidence chain">
+              <div className="panel-heading">
+                <div>
+                  <p className="section-kicker">Verification</p>
+                  <h2>Evidence chain</h2>
+                </div>
+                <span className={`summary-status ${advance ? "is-ready" : ""}`}>
+                  {advance ? "Evidence ready" : "Awaiting input"}
+                </span>
+              </div>
+
+              <div className="evidence-list">
+                <EvidenceStep
+                  active={Boolean(advance)}
+                  icon={TrendingUp}
+                  rows={[
+                    ["Graph block", advance ? advance.market.indexedBlock.toLocaleString() : "—"],
+                    ["Freshness", graphAge],
+                    ["Deployment", advance?.market.subgraphDeployment ?? "—"]
+                  ]}
+                  status={advance ? (demo ? "Simulated" : "Verified") : "Waiting"}
+                  title="Market evidence"
+                />
+                <EvidenceStep
+                  active={Boolean(advance)}
+                  icon={LockKeyhole}
+                  rows={[
+                    ["Trust mode", advance?.riskReceipt.trustMode ?? "—"],
+                    ["Model", advance?.riskReceipt.model ?? "—"],
+                    ["Policy cap", advance ? usd(advance.authorization.policyMaxMinor) : "—"]
+                  ]}
+                  status={
+                    advance
+                      ? advance.riskReceipt.teeVerified
+                        ? "TEE verified"
+                        : "Simulated"
+                      : "Waiting"
+                  }
+                  title="Private risk"
+                />
+                <EvidenceStep
+                  active={Boolean(advance)}
+                  icon={Landmark}
+                  rows={[
+                    ["Hedera payment", funded ? "Consensus receipt" : "Pending confirmation"],
+                    ["Advance Note", funded ? `#${advance.funding?.noteSerial}` : "Ready to mint"],
+                    ["HCS record", funded ? `#${advance.funding?.hcsSequenceNumber}` : "Ready"]
+                  ]}
+                  status={
+                    funded ? (demo ? "Simulated" : "Confirmed") : advance ? "Ready" : "Waiting"
+                  }
+                  title="Bounded payment"
+                />
+              </div>
+
+              {authorized ? (
+                <section className="approval">
+                  <div className="approval-heading">
+                    <span className="approval-icon">
+                      <Check aria-hidden="true" size={18} />
+                    </span>
+                    <div>
+                      <span>Advance authorized</span>
+                      <strong>{usd(advance.authorization.amountMinor)}</strong>
+                    </div>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>Term</dt>
+                      <dd>{advance.termDays} days</dd>
+                    </div>
+                    <div>
+                      <dt>Policy cap</dt>
+                      <dd>{usd(advance.authorization.policyMaxMinor)}</dd>
+                    </div>
+                  </dl>
+                  <button disabled={busy !== null} onClick={fund} type="button">
+                    <Landmark aria-hidden="true" size={17} />
+                    {busy === "fund" ? "Funding…" : "Fund test advance"}
+                  </button>
+                  <p>Preview only. Testnet tokens create no repayment obligation.</p>
+                </section>
+              ) : null}
+            </aside>
           </div>
 
-          {advance?.state === "AUTHORIZED" && (
-            <section className="approval">
+          <section className="receipt panel" id="receipt">
+            <div className="panel-heading receipt-title">
               <div>
-                <span>Final safe amount</span>
-                <strong>{usd(advance.authorization.amountMinor)}</strong>
+                <p className="section-kicker">Audit record</p>
+                <h2>Proof receipt</h2>
               </div>
-              <div>
-                <span>Term</span>
-                <strong>{advance.termDays} days</strong>
-              </div>
-              <button type="button" onClick={fund} disabled={busy !== null}>
-                {busy === "fund" ? "Funding…" : "Fund test advance"}
-              </button>
-              <p>Preview only. Funding uses testnet tokens and creates no legal collateral.</p>
-            </section>
-          )}
+              <span className={`summary-status ${funded ? "is-ready" : ""}`}>
+                {funded ? (demo ? "Simulated receipt" : "Consensus confirmed") : "Not generated"}
+              </span>
+            </div>
 
-          {funded && advance.funding && (
-            <section className="receipt" id="receipt">
-              <div className="receipt-heading">
-                <div>
-                  <span>Proof receipt</span>
-                  <h2>{demo ? "Simulated demo" : "Consensus confirmed"}</h2>
+            {funded && advance.funding ? (
+              <div className="receipt-layout">
+                <dl className="receipt-data">
+                  <div>
+                    <dt>Payment transaction</dt>
+                    <dd>
+                      <a
+                        href={advance.funding.mirrorTransactionUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {advance.funding.paymentTxId}
+                        <ExternalLink aria-hidden="true" size={13} />
+                      </a>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>NFT receipt</dt>
+                    <dd>
+                      <a href={advance.funding.mirrorTokenUrl} rel="noreferrer" target="_blank">
+                        {advance.funding.noteTokenId}/{advance.funding.noteSerial}
+                        <ExternalLink aria-hidden="true" size={13} />
+                      </a>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>HCS topic</dt>
+                    <dd>{advance.funding.hcsTopicId}</dd>
+                  </div>
+                  <div>
+                    <dt>Advance ID</dt>
+                    <dd>{advance.advanceId}</dd>
+                  </div>
+                </dl>
+                <div className="receipt-proof">
+                  <FileCheck2 aria-hidden="true" size={28} />
+                  <div>
+                    <strong>A transaction ID alone is not settlement proof.</strong>
+                    <p>
+                      The receipt binds the payment, Advance Note, HCS record, and public
+                      commitments.
+                    </p>
+                  </div>
                 </div>
-                <Icon name="check" />
               </div>
-              <dl>
+            ) : (
+              <div className="empty-receipt">
+                <ReceiptText aria-hidden="true" size={26} />
                 <div>
-                  <dt>Payment tx</dt>
-                  <dd>
-                    <a href={advance.funding.mirrorTransactionUrl} target="_blank" rel="noreferrer">
-                      {advance.funding.paymentTxId}
-                    </a>
-                  </dd>
+                  <strong>No receipt yet</strong>
+                  <p>Evaluate and fund the test advance to create a verifiable record.</p>
                 </div>
-                <div>
-                  <dt>NFT receipt</dt>
-                  <dd>
-                    <a href={advance.funding.mirrorTokenUrl} target="_blank" rel="noreferrer">
-                      {advance.funding.noteTokenId}/{advance.funding.noteSerial}
-                    </a>
-                  </dd>
-                </div>
-                <div>
-                  <dt>HCS topic</dt>
-                  <dd>{advance.funding.hcsTopicId}</dd>
-                </div>
-                <div>
-                  <dt>Advance ID</dt>
-                  <dd>{advance.advanceId}</dd>
-                </div>
-              </dl>
-              <p>
-                {demo
-                  ? "Simulation only. These identifiers are not partner proof."
-                  : "Verified through Hedera Testnet consensus and public Mirror Node records."}
-              </p>
-            </section>
-          )}
-        </aside>
-      </main>
-      <footer>
-        <span>Testnet environment — synthetic data and test tokens only.</span>
-        <span>unlockd.bond v1.0</span>
-      </footer>
+              </div>
+            )}
+          </section>
+
+          <section className="trust-strip" aria-label="Privacy and environment disclosures">
+            <div>
+              <LockKeyhole aria-hidden="true" size={18} />
+              <span>Private inputs stay offchain. Public receipts contain commitments only.</span>
+            </div>
+            <div>
+              <Building2 aria-hidden="true" size={18} />
+              <span>Synthetic profile · Test tokens only · Not legal collateral</span>
+            </div>
+          </section>
+        </main>
+
+        <footer>
+          <span>unlockd.bond · Institutional testnet prototype</span>
+          <span>Hedera Testnet · Synthetic data only</span>
+        </footer>
+      </div>
     </div>
   );
 }
