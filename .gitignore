@@ -146,5 +146,6 @@ vite.config.ts.timestamp-*
 .DS_Store
 .codebase-memory/
 
-# Private competitor design research
-design-research/secfi/
+# Private design and comparison research
+design-research/
+design-qa.md

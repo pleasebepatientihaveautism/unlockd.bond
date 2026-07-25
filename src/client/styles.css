@@ -229,7 +229,7 @@ button {
   position: sticky;
   z-index: 20;
   top: 0;
-  min-height: 72px;
+  min-height: 88px;
   padding: 0 32px;
   display: flex;
   align-items: center;
@@ -245,6 +245,12 @@ button {
   gap: 9px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.breadcrumb > span:first-child {
+  color: var(--ink);
+  font-size: 25px;
+  letter-spacing: -0.03em;
 }
 
 .breadcrumb strong {
@@ -279,12 +285,12 @@ button {
 .content {
   width: min(1180px, 100%);
   margin: 0 auto;
-  padding: 56px 48px 64px;
+  padding: 132px 48px 64px;
 }
 
 .assistant-hero {
   max-width: 800px;
-  margin: 0 auto 68px;
+  margin: 0 auto 88px;
   text-align: center;
 }
 
@@ -345,6 +351,14 @@ button {
 
 .dashboard-section {
   margin-bottom: 48px;
+}
+
+#overview,
+#equity,
+#advance,
+#evidence,
+#receipt {
+  scroll-margin-top: 104px;
 }
 
 .section-heading,
@@ -1057,7 +1071,7 @@ footer {
   }
 
   .content {
-    padding: 42px 18px 48px;
+    padding: 132px 18px 48px;
   }
 
   .assistant-hero {
