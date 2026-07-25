@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
+  AccountBalanceQuery,
   AccountCreateTransaction,
   AccountId,
   Client,
@@ -12,7 +13,8 @@ import {
   TokenCreateTransaction,
   TokenSupplyType,
   TokenType,
-  TopicCreateTransaction
+  TopicCreateTransaction,
+  TransferTransaction
 } from "@hashgraph/sdk";
 import { parse } from "dotenv";
 
@@ -118,7 +120,7 @@ async function mirrorAccount(accountId: string): Promise<MirrorAccount> {
 
 async function operatorKey(account: MirrorAccount): Promise<PrivateKey> {
   if (state.HEDERA_OPERATOR_KEY) {
-    const key = PrivateKey.fromString(state.HEDERA_OPERATOR_KEY);
+    const key = PrivateKey.fromStringDer(state.HEDERA_OPERATOR_KEY);
     if (key.publicKey.toStringRaw() !== account.key?.key.toLowerCase()) {
       throw new Error("OPERATOR_PRIVATE_KEY_MISMATCH");
     }
@@ -128,15 +130,85 @@ async function operatorKey(account: MirrorAccount): Promise<PrivateKey> {
   const words = phrase.split(/\s+/);
   if (words.length !== 24) throw new Error("OPERATOR_MNEMONIC_MUST_HAVE_24_WORDS");
   const mnemonic = await Mnemonic.fromWords(words);
-  const candidates = [
-    await mnemonic.toStandardEd25519PrivateKey(),
-    await mnemonic.toLegacyPrivateKey()
-  ];
-  const key = candidates.find(
-    (candidate) => candidate.publicKey.toStringRaw() === account.key?.key.toLowerCase()
-  );
-  if (!key) throw new Error("OPERATOR_MNEMONIC_DOES_NOT_MATCH_ACCOUNT");
-  return key;
+  const expectedPublicKey = account.key?.key.toLowerCase();
+  const matches = (candidate: PrivateKey) =>
+    candidate.publicKey.toStringRaw() === expectedPublicKey;
+
+  for (let index = 0; index <= 50; index += 1) {
+    const candidate = await mnemonic.toStandardEd25519PrivateKey("", index);
+    if (matches(candidate)) return candidate;
+  }
+
+  const legacy = await mnemonic.toLegacyPrivateKey();
+  if (matches(legacy)) return legacy;
+  for (let index = 0; index <= 20; index += 1) {
+    const candidatePaths = [
+      [44, 3030, 0, 0, index],
+      [44, 3030, 0, index],
+      [44, 3030, index, 0]
+    ];
+    for (const derivationPath of candidatePaths) {
+      const candidate = await mnemonic.toEd25519PrivateKey("", derivationPath);
+      if (matches(candidate)) return candidate;
+    }
+  }
+  throw new Error("OPERATOR_MNEMONIC_DOES_NOT_MATCH_ACCOUNT");
+}
+
+function storedPrivateKey(value: string): PrivateKey {
+  try {
+    return PrivateKey.fromStringDer(value);
+  } catch {
+    throw new Error("STORED_HEDERA_PRIVATE_KEY_INVALID");
+  }
+}
+
+async function balanceTinybar(client: Client, accountId: string): Promise<bigint> {
+  const balance = await new AccountBalanceQuery().setAccountId(accountId).execute(client);
+  return BigInt(balance.hbars.toTinybars().toString());
+}
+
+async function consolidateProvisioningBalance(
+  client: Client,
+  operatorId: AccountId,
+  treasuryId: string,
+  treasuryKey: PrivateKey,
+  poolId: string,
+  poolKey: PrivateKey
+): Promise<void> {
+  const target = 1_650_000_000n;
+  const operatorBalance = await balanceTinybar(client, operatorId.toString());
+  if (operatorBalance >= target) return;
+
+  const treasuryBalance = await balanceTinybar(client, treasuryId);
+  const poolBalance = await balanceTinybar(client, poolId);
+  const treasuryAvailable = treasuryBalance > 150_000_000n ? treasuryBalance - 150_000_000n : 0n;
+  const poolAvailable = poolBalance > 20_000_000n ? poolBalance - 20_000_000n : 0n;
+  const needed = target - operatorBalance;
+  if (treasuryAvailable + poolAvailable < needed) {
+    throw new Error("TESTNET_FAUCET_REQUIRED_MINIMUM_17_HBAR");
+  }
+
+  const fromTreasury = treasuryAvailable < needed ? treasuryAvailable : needed;
+  const fromPool = needed - fromTreasury;
+  let transfer = new TransferTransaction()
+    .addHbarTransfer(operatorId, Hbar.fromTinybars(needed))
+    .setTransactionMemo("unlockd.bond provisioning balance consolidation")
+    .setMaxTransactionFee(new Hbar(1));
+  if (fromTreasury > 0n) {
+    transfer = transfer.addHbarTransfer(treasuryId, Hbar.fromTinybars(-fromTreasury));
+  }
+  if (fromPool > 0n) {
+    transfer = transfer.addHbarTransfer(poolId, Hbar.fromTinybars(-fromPool));
+  }
+  transfer = transfer.freezeWith(client);
+  if (fromTreasury > 0n) transfer = await transfer.sign(treasuryKey);
+  if (fromPool > 0n) transfer = await transfer.sign(poolKey);
+  const executed = await transfer.execute(client);
+  const receipt = await executed.getReceipt(client);
+  if (receipt.status.toString() !== "SUCCESS") {
+    throw new Error("PROVISIONING_BALANCE_CONSOLIDATION_FAILED");
+  }
 }
 
 async function createAccount(
@@ -200,13 +272,13 @@ if (account.balance.balance < plannedInitialBalance + 150_000_000) {
 }
 const key = await operatorKey(account);
 const treasuryKey = state.HEDERA_TREASURY_KEY
-  ? PrivateKey.fromString(state.HEDERA_TREASURY_KEY)
+  ? storedPrivateKey(state.HEDERA_TREASURY_KEY)
   : PrivateKey.generateED25519();
 const poolKey = state.HEDERA_POOL_KEY
-  ? PrivateKey.fromString(state.HEDERA_POOL_KEY)
+  ? storedPrivateKey(state.HEDERA_POOL_KEY)
   : PrivateKey.generateED25519();
 const supplyKey = state.HEDERA_SUPPLY_KEY
-  ? PrivateKey.fromString(state.HEDERA_SUPPLY_KEY)
+  ? storedPrivateKey(state.HEDERA_SUPPLY_KEY)
   : PrivateKey.generateED25519();
 
 Object.assign(state, {
@@ -270,6 +342,14 @@ try {
     persistEnv();
   }
   if (!state.HEDERA_TOKEN_ID) {
+    await consolidateProvisioningBalance(
+      client,
+      AccountId.fromString(operatorIdText),
+      state.HEDERA_TREASURY_ID,
+      treasuryKey,
+      state.HEDERA_POOL_ID,
+      poolKey
+    );
     process.stdout.write("Creating Advance Note NFT collection...\n");
     const frozen = new TokenCreateTransaction()
       .setTokenName("unlockd.bond Advance Note")
@@ -279,6 +359,7 @@ try {
       .setTreasuryAccountId(AccountId.fromString(state.HEDERA_TREASURY_ID))
       .setSupplyKey(supplyKey.publicKey)
       .setTokenMemo("Testnet receivable representation; not stock or legal collateral")
+      .setMaxTransactionFee(new Hbar(16))
       .freezeWith(client);
     const treasurySigned = await frozen.sign(treasuryKey);
     const supplySigned = await treasurySigned.sign(supplyKey);
@@ -301,6 +382,7 @@ try {
       await new TokenAssociateTransaction()
         .setAccountId(AccountId.fromString(pool.account))
         .setTokenIds([state.HEDERA_TOKEN_ID])
+        .setMaxTransactionFee(new Hbar(2))
         .freezeWith(client)
         .sign(poolKey)
     ).execute(client);
