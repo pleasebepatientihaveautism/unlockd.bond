@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 # Local OS and Codex artifacts
 .DS_Store
 .codebase-memory/
+
+# Private competitor design research
+design-research/secfi/
