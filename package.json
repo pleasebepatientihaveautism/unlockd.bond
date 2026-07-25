@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "db:migrate": "node scripts/migrate.mjs",
     "hedera:provision": "tsx scripts/provision-hedera.ts",
+    "hedera:fund-operator": "tsx scripts/fund-hedera-operator.ts",
     "dev:hedera": "DOTENV_CONFIG_PATH=.env.hedera.local tsx watch src/server/index.ts",
     "hedera:demo": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/run-hedera-demo.ts",
     "hedera:verify": "tsx scripts/verify-hedera.ts"

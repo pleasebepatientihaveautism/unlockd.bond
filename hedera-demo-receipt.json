@@ -1,0 +1,39 @@
+{
+  "network": "testnet",
+  "advanceId": "ub_0b64a5136c1a4be2871b3726ad0ba52b",
+  "recipientAccountId": "0.0.9750175",
+  "amountTinybar": "1000000",
+  "funding": {
+    "paymentTxId": "0.0.9750175@1785015965.188075917",
+    "noteTokenId": "0.0.9752761",
+    "noteSerial": "1",
+    "hcsTopicId": "0.0.9751837",
+    "hcsSequenceNumber": "3",
+    "consensusTimestamp": "1785015968.674684021",
+    "consensusStatus": "SUCCESS",
+    "mirrorTransactionUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785015965-188075917",
+    "mirrorTokenUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/1",
+    "hashscanTransactionUrl": "https://hashscan.io/testnet/transaction/0.0.9750175%401785015965.188075917",
+    "hashscanTokenUrl": "https://hashscan.io/testnet/token/0.0.9752761",
+    "hashscanTopicUrl": "https://hashscan.io/testnet/topic/0.0.9751837",
+    "simulated": false
+  },
+  "generatedAt": "2026-07-25T21:46:13.531Z",
+  "mirrorVerifiedAt": "2026-07-25T21:46:19.833Z",
+  "verification": {
+    "payment": {
+      "result": "SUCCESS",
+      "consensusTimestamp": "1785015968.674684021",
+      "url": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785015965-188075917"
+    },
+    "nft": {
+      "owner": "0.0.9751836",
+      "url": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/1"
+    },
+    "hcs": {
+      "sequenceNumber": "3",
+      "consensusTimestamp": "1785015971.634254697",
+      "url": "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.9751837/messages/3"
+    }
+  }
+}

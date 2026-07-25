@@ -138,6 +138,20 @@ npm run hedera:verify
 `HEDERA_POOL_KEY` is used only by provisioning for token association and is not
 read by the application runtime.
 
+### Verified Testnet evidence
+
+The current public demo infrastructure and its latest independently verified
+receipt are committed as:
+
+- [`hedera-testnet-evidence.json`](hedera-testnet-evidence.json) — operator,
+  treasury, pool, HCS topic, NFT collection, and explorer links;
+- [`hedera-demo-receipt.json`](hedera-demo-receipt.json) — payment consensus
+  `SUCCESS`, UBAN NFT serial `1` owned by the pool, and matching funded HCS
+  sequence `3`.
+
+These artifacts contain public Testnet identifiers only. Runtime keys remain in
+ignored `.env.hedera.local`.
+
 The live funding adapter:
 
 1. verifies TEE status;

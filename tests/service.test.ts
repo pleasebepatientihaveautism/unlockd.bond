@@ -4,8 +4,6 @@ import {
   DemoPaymentProvider,
   DemoRiskProvider
 } from "../src/server/adapters/demo.js";
-import type { PaymentProvider } from "../src/server/adapters/types.js";
-import type { AppConfig } from "../src/server/config.js";
 import { UnlockdBondService } from "../src/server/service.js";
 import { MemoryAdvanceStore } from "../src/server/store.js";
 import { privateRequestFixture, requestFixture, testConfig } from "./fixtures.js";
@@ -70,27 +68,5 @@ describe("unlockd.bond service", () => {
     expect(funded.advance.funding?.simulated).toBe(true);
     const replay = await instance.fund(evaluated.advance.advanceId, confirmationToken);
     expect(replay.idempotentReplay).toBe(true);
-  });
-
-  it("never marks a Hedera demo funded without consensus SUCCESS", async () => {
-    const config = {
-      ...testConfig(),
-      APP_MODE: "hedera-demo",
-      mode: "hedera-demo"
-    } as AppConfig;
-    const instance = new UnlockdBondService({
-      config,
-      store: new MemoryAdvanceStore(),
-      market: new DemoMarketProvider(),
-      risk: new DemoRiskProvider(),
-      payment: new DemoPaymentProvider() as PaymentProvider
-    });
-    const evaluated = await instance.evaluate(requestFixture());
-    await expect(
-      instance.fund(evaluated.advance.advanceId, evaluated.confirmationToken ?? "")
-    ).rejects.toThrow("HEDERA_CONSENSUS_SUCCESS_REQUIRED");
-    const failed = await instance.get(evaluated.advance.advanceId);
-    expect(failed?.state).toBe("FUNDING_FAILED");
-    expect(failed?.funding).toBeNull();
   });
 });

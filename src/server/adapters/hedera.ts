@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   AccountBalanceQuery,
   AccountId,
@@ -35,17 +36,12 @@ function privateKey(value: string): PrivateKey {
   }
 }
 
-function encodeMetadata(packet: FundingPacket): Uint8Array {
-  const compact = JSON.stringify({
-    v: 1,
-    type: "UNLOCKD_BOND_ADVANCE_NOTE",
-    advanceId: packet.advanceId,
-    decisionCommitment: packet.decisionCommitment,
-    marketCommitment: packet.marketCommitment
-  });
-  const bytes = new TextEncoder().encode(compact);
-  if (bytes.byteLength > 100) throw new Error("HTS_METADATA_TOO_LARGE");
-  return bytes;
+export function encodeMetadata(packet: FundingPacket): Uint8Array {
+  const advanceDigest = createHash("sha256").update(packet.advanceId).digest().subarray(0, 16);
+  const evidenceDigest = createHash("sha256")
+    .update(`${packet.decisionCommitment}|${packet.marketCommitment}`)
+    .digest();
+  return Uint8Array.from([1, ...advanceDigest, ...evidenceDigest]);
 }
 
 export class HederaPaymentProvider implements PaymentProvider {
