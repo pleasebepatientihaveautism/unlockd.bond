@@ -6,6 +6,7 @@ const decimalUnits = z
 
 const positiveMinor = z.number().int().positive().max(100_000_000);
 const hederaAccount = z.string().regex(/^0\.0\.\d{3,12}$/);
+export const assetSymbolSchema = z.enum(["AAPL", "WHOOP"]);
 
 export const advanceRequestSchema = z
   .object({
@@ -19,7 +20,7 @@ export const advanceRequestSchema = z
       statusVerified: z.boolean()
     }),
     grant: z.object({
-      assetSymbol: z.literal("AAPL"),
+      assetSymbol: assetSymbolSchema,
       grantType: z.enum(["RSU", "OPTION"]),
       vestedUnits: decimalUnits,
       strikePriceMinor: z.number().int().min(0).max(100_000_000),
@@ -45,12 +46,19 @@ export const advanceRequestSchema = z
 
 export const marketSnapshotSchema = z
   .object({
-    source: z.literal("the-graph"),
-    network: z.literal("robinhood"),
-    chainId: z.literal(4663),
-    assetSymbol: z.literal("AAPL"),
-    tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
-    feedAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+    evidenceType: z.enum(["PUBLIC_MARKET", "PRIVATE_VALUATION"]),
+    source: z.enum(["the-graph", "issuer-valuation"]),
+    network: z.enum(["robinhood", "private-company"]),
+    chainId: z.union([z.literal(0), z.literal(4663)]),
+    assetSymbol: assetSymbolSchema,
+    tokenAddress: z
+      .string()
+      .regex(/^0x[a-fA-F0-9]{40}$/)
+      .nullable(),
+    feedAddress: z
+      .string()
+      .regex(/^0x[a-fA-F0-9]{40}$/)
+      .nullable(),
     priceUsdMinor: positiveMinor,
     priceUpdatedAt: z.number().int().positive(),
     oraclePaused: z.boolean(),
@@ -62,9 +70,39 @@ export const marketSnapshotSchema = z
     indexedBlockHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
     indexedBlockTimestamp: z.number().int().positive(),
     hasIndexingErrors: z.boolean(),
+    valuationBasis: z.string().min(3).max(160),
+    externalEvidenceLabel: z.string().min(3).max(160).nullable(),
     simulated: z.boolean()
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.evidenceType === "PUBLIC_MARKET" &&
+      (!value.tokenAddress ||
+        !value.feedAddress ||
+        value.assetSymbol !== "AAPL" ||
+        value.chainId !== 4663)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["evidenceType"],
+        message: "Public market evidence requires AAPL Robinhood token and feed addresses"
+      });
+    }
+    if (
+      value.evidenceType === "PRIVATE_VALUATION" &&
+      (value.assetSymbol !== "WHOOP" ||
+        value.chainId !== 0 ||
+        value.tokenAddress !== null ||
+        value.feedAddress !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["evidenceType"],
+        message: "Private valuation evidence requires WHOOP without public token addresses"
+      });
+    }
+  });
 
 export const riskDecisionSchema = z
   .object({
@@ -102,13 +140,18 @@ export const fundingResultSchema = z
     hcsTopicId: z.string().min(3).max(80),
     hcsSequenceNumber: z.string().regex(/^\d+$/),
     consensusTimestamp: z.string().min(3).max(80),
+    consensusStatus: z.enum(["SUCCESS", "SIMULATED"]),
     mirrorTransactionUrl: z.string().url(),
     mirrorTokenUrl: z.string().url(),
+    hashscanTransactionUrl: z.string().url(),
+    hashscanTokenUrl: z.string().url(),
+    hashscanTopicUrl: z.string().url(),
     simulated: z.boolean()
   })
   .strict();
 
 export type AdvanceRequest = z.infer<typeof advanceRequestSchema>;
+export type AssetSymbol = z.infer<typeof assetSymbolSchema>;
 export type MarketSnapshot = z.infer<typeof marketSnapshotSchema>;
 export type RiskDecision = z.infer<typeof riskDecisionSchema>;
 export type RiskReceipt = z.infer<typeof riskReceiptSchema>;

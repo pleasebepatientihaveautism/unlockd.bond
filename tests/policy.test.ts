@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { authorizeAdvance, decimalToMicrounits, PolicyError } from "../src/domain/policy.js";
 import type { RiskDecision } from "../src/domain/schemas.js";
-import { marketFixture, requestFixture } from "./fixtures.js";
+import {
+  marketFixture,
+  privateMarketFixture,
+  privateRequestFixture,
+  requestFixture
+} from "./fixtures.js";
 
 const risk: RiskDecision = {
   schemaVersion: "unlockd-bond-risk-v1",
@@ -52,6 +57,41 @@ describe("deterministic policy", () => {
         minGraphSamples: 2
       })
     ).toThrowError("Market oracle is paused");
+  });
+
+  it("values private options after strike and a conservative illiquidity haircut", () => {
+    const privateRisk: RiskDecision = {
+      ...risk,
+      recommendedAdvanceMinor: 150_000,
+      volatilityHaircutBps: 0,
+      liquidityHaircutBps: 6000,
+      reasonCodes: ["PRIVATE_COMPANY_ILLIQUID"]
+    };
+    const result = authorizeAdvance(privateRequestFixture(), privateMarketFixture(), privateRisk, {
+      fixedCapMinor: 200_000,
+      maxGraphAgeSeconds: 180,
+      minGraphSamples: 2
+    });
+    expect(result.decision).toBe("AUTHORIZED");
+    expect(result.eligibleEquityValueMinor).toBe(2_160_000);
+    expect(result.marketHaircutBps).toBe(7000);
+    expect(result.amountMinor).toBe(150_000);
+  });
+
+  it("fails closed when private-company valuation evidence is over one year old", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(() =>
+      authorizeAdvance(
+        privateRequestFixture(),
+        privateMarketFixture({
+          priceUpdatedAt: now - 366 * 24 * 60 * 60,
+          indexedBlockTimestamp: now - 366 * 24 * 60 * 60
+        }),
+        { ...risk, volatilityHaircutBps: 0, liquidityHaircutBps: 6000 },
+        { fixedCapMinor: 200_000, maxGraphAgeSeconds: 180, minGraphSamples: 2 },
+        now
+      )
+    ).toThrowError(new PolicyError("PRIVATE_VALUATION_STALE", "Market evidence is stale"));
   });
 
   it("does not authorize a rejected model decision", () => {

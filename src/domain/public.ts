@@ -7,7 +7,7 @@ export interface AdvanceRecord {
   advanceId: string;
   requestId: string;
   state: AdvanceState;
-  mode: "demo" | "live";
+  mode: "demo" | "hedera-demo" | "live";
   recipientAccountId: string;
   termDays: number;
   createdAt: string;

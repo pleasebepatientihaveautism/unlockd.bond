@@ -17,7 +17,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "node scripts/migrate.mjs",
-    "hedera:provision": "tsx scripts/provision-hedera.ts"
+    "hedera:provision": "tsx scripts/provision-hedera.ts",
+    "dev:hedera": "DOTENV_CONFIG_PATH=.env.hedera.local tsx watch src/server/index.ts",
+    "hedera:demo": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/run-hedera-demo.ts",
+    "hedera:verify": "tsx scripts/verify-hedera.ts"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.2.6",

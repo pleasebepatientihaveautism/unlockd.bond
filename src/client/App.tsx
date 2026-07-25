@@ -20,21 +20,25 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { PublicAdvance } from "../domain/public";
-import type { AdvanceRequest } from "../domain/schemas";
+import type { AdvanceRequest, AssetSymbol } from "../domain/schemas";
 import { evaluateAdvance, fundAdvance } from "./api";
 
 type FormState = {
+  asset: AssetSymbol;
   account: string;
   income: string;
   units: string;
+  strike: string;
   amount: string;
   term: "14" | "30" | "45";
 };
 
 const initialForm: FormState = {
+  asset: "AAPL",
   account: "0.0.653284",
   income: "6500",
   units: "120.0000",
+  strike: "0",
   amount: "1500",
   term: "30"
 };
@@ -176,10 +180,10 @@ function buildInput(form: FormState): AdvanceRequest {
       statusVerified: true
     },
     grant: {
-      assetSymbol: "AAPL",
-      grantType: "RSU",
+      assetSymbol: form.asset,
+      grantType: form.asset === "WHOOP" ? "OPTION" : "RSU",
       vestedUnits: form.units,
-      strikePriceMinor: 0,
+      strikePriceMinor: form.asset === "WHOOP" ? Math.round(Number(form.strike) * 100) : 0,
       transferRestricted: true,
       attestationCommitment: `sha256:${"a".repeat(64)}`
     },
@@ -201,8 +205,29 @@ export function App() {
 
   const graphAge = useMemo(() => {
     if (!advance) return "Awaiting evaluation";
-    return `${Math.max(0, Math.floor(Date.now() / 1000) - advance.market.indexedBlockTimestamp)}s ago`;
+    const seconds = Math.max(
+      0,
+      Math.floor(Date.now() / 1000) - advance.market.indexedBlockTimestamp
+    );
+    return advance.market.evidenceType === "PRIVATE_VALUATION"
+      ? `${Math.floor(seconds / 86_400)} days ago`
+      : `${seconds}s ago`;
   }, [advance]);
+
+  const privateCompany = form.asset === "WHOOP";
+  const selectedAdvanceIsPrivate = advance?.market.evidenceType === "PRIVATE_VALUATION";
+
+  function selectAsset(asset: AssetSymbol) {
+    setForm({
+      ...form,
+      asset,
+      units: asset === "WHOOP" ? "20000.0000" : "120.0000",
+      strike: asset === "WHOOP" ? "1.20" : "0"
+    });
+    setAdvance(null);
+    setToken(null);
+    setError(null);
+  }
 
   async function evaluate(event: React.FormEvent) {
     event.preventDefault();
@@ -233,8 +258,11 @@ export function App() {
     }
   }
 
-  const demo = advance?.mode !== "live";
-  const funded = advance?.state === "FUNDED";
+  const fundingSimulated = advance?.funding?.simulated ?? false;
+  const funded =
+    advance?.state === "FUNDED" &&
+    Boolean(advance.funding) &&
+    (advance.funding?.consensusStatus === "SUCCESS" || fundingSimulated);
   const authorized = advance?.state === "AUTHORIZED";
   const verifiedCount = funded ? 4 : authorized ? 3 : advance ? 2 : 1;
 
@@ -309,8 +337,8 @@ export function App() {
             <p className="eyebrow">Private, equity-aware salary advances</p>
             <h1 id="workspace-title">Unlock value from vested equity</h1>
             <p>
-              Verify public market evidence, assess repayment privately, and settle a bounded
-              advance on Hedera Testnet.
+              Verify public or private-company equity evidence, assess repayment privately, and
+              settle a bounded advance on Hedera Testnet.
             </p>
             <nav className="quick-actions" aria-label="Quick actions">
               <a href="#advance">
@@ -337,25 +365,57 @@ export function App() {
               <a href="#advance">Update details</a>
             </div>
 
+            <fieldset className="asset-selector">
+              <legend>Select equity example</legend>
+              <button
+                aria-pressed={!privateCompany}
+                className={!privateCompany ? "is-selected" : ""}
+                onClick={() => selectAsset("AAPL")}
+                type="button"
+              >
+                <span>Public company</span>
+                <strong>Apple · AAPL</strong>
+              </button>
+              <button
+                aria-pressed={privateCompany}
+                className={privateCompany ? "is-selected" : ""}
+                onClick={() => selectAsset("WHOOP")}
+                type="button"
+              >
+                <span>Private company</span>
+                <strong>WHOOP · Pre-IPO</strong>
+              </button>
+            </fieldset>
+
             <div className="equity-grid">
               <article className="metric-card total-card">
                 <span className="card-label">Eligible equity</span>
-                <strong>120</strong>
-                <span className="metric-unit">vested RSUs</span>
+                <strong>{privateCompany ? "20,000" : "120"}</strong>
+                <span className="metric-unit">
+                  {privateCompany ? "vested options" : "vested RSUs"}
+                </span>
                 <div className="metric-status">
                   <TrendingUp aria-hidden="true" size={16} />
-                  Public market evidence available
+                  {privateCompany
+                    ? "Synthetic private valuation available"
+                    : "Public market evidence available"}
                 </div>
               </article>
 
               <article className="metric-card company-card">
                 <div className="company-mark">
-                  <img alt="Apple" src="/assets/apple-logo.jpg" />
+                  {privateCompany ? (
+                    <Building2 aria-label="WHOOP" size={28} strokeWidth={1.6} />
+                  ) : (
+                    <img alt="Apple" src="/assets/apple-logo.jpg" />
+                  )}
                 </div>
                 <div>
-                  <span className="card-label">Apple Inc.</span>
-                  <strong>AAPL</strong>
-                  <span>RSU · 120 vested</span>
+                  <span className="card-label">
+                    {privateCompany ? "WHOOP, Inc." : "Apple Inc."}
+                  </span>
+                  <strong>{form.asset}</strong>
+                  <span>{privateCompany ? "Option · 20,000 vested" : "RSU · 120 vested"}</span>
                 </div>
                 <span className="eligibility-badge">
                   <Check aria-hidden="true" size={14} />
@@ -381,6 +441,50 @@ export function App() {
                 <a href="#advance">{advance ? "Continue review" : "Start evaluation"}</a>
               </article>
             </div>
+
+            {privateCompany ? (
+              <article className="private-model">
+                <div>
+                  <p className="section-kicker">How pre-IPO equity is assessed</p>
+                  <h3>A bounded estimate without pretending WHOOP shares are tradable</h3>
+                </div>
+                <ol>
+                  <li>
+                    <span>1</span>
+                    <div>
+                      <strong>Verify the vested grant</strong>
+                      <p>20,000 synthetic vested options; unvested units stay excluded.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <span>2</span>
+                    <div>
+                      <strong>Use common-share evidence</strong>
+                      <p>Synthetic 409A FMV of $4.80, less the $1.20 exercise price.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <span>3</span>
+                    <div>
+                      <strong>Apply private-market controls</strong>
+                      <p>60% illiquidity haircut plus a 10% policy buffer.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <span>4</span>
+                    <div>
+                      <strong>Cap the credit line</strong>
+                      <p>The lowest of equity, income, model, request, and fixed limits wins.</p>
+                    </div>
+                  </li>
+                </ol>
+                <p className="private-model-note">
+                  WHOOP’s $10.1B Series G valuation is company-level context only—not an employee
+                  common-share price. The shares remain restricted; this demo creates no transfer,
+                  pledge, or lien.
+                </p>
+              </article>
+            ) : null}
           </section>
 
           <div className="flow-grid">
@@ -421,11 +525,20 @@ export function App() {
                 />
                 <Field
                   help="Vested units only; unvested units are excluded."
-                  label="Vested AAPL RSUs"
+                  label={privateCompany ? "Vested WHOOP options" : "Vested AAPL RSUs"}
                   onChange={(value) => setForm({ ...form, units: value })}
-                  prefix="AAPL"
+                  prefix={form.asset}
                   value={form.units}
                 />
+                {privateCompany ? (
+                  <Field
+                    help="Synthetic option exercise price used for this example."
+                    label="Exercise price"
+                    onChange={(value) => setForm({ ...form, strike: value })}
+                    prefix="USD"
+                    value={form.strike}
+                  />
+                ) : null}
                 <Field
                   help="Simulated amount you would like to access."
                   label="Requested amount"
@@ -493,13 +606,31 @@ export function App() {
                 <EvidenceStep
                   active={Boolean(advance)}
                   icon={TrendingUp}
-                  rows={[
-                    ["Graph block", advance ? advance.market.indexedBlock.toLocaleString() : "—"],
-                    ["Freshness", graphAge],
-                    ["Deployment", advance?.market.subgraphDeployment ?? "—"]
-                  ]}
-                  status={advance ? (demo ? "Simulated" : "Verified") : "Waiting"}
-                  title="Market evidence"
+                  rows={
+                    selectedAdvanceIsPrivate
+                      ? [
+                          [
+                            "Common FMV",
+                            advance ? `${usd(advance.market.priceUsdMinor)} / share` : "—"
+                          ],
+                          ["Evidence age", graphAge],
+                          ["Evidence bundle", advance?.market.subgraphDeployment ?? "—"]
+                        ]
+                      : [
+                          [
+                            "Graph block",
+                            advance ? advance.market.indexedBlock.toLocaleString() : "—"
+                          ],
+                          ["Freshness", graphAge],
+                          ["Deployment", advance?.market.subgraphDeployment ?? "—"]
+                        ]
+                  }
+                  status={
+                    advance ? (advance.market.simulated ? "Simulated" : "Verified") : "Waiting"
+                  }
+                  title={
+                    selectedAdvanceIsPrivate ? "Private valuation evidence" : "Market evidence"
+                  }
                 />
                 <EvidenceStep
                   active={Boolean(advance)}
@@ -527,7 +658,13 @@ export function App() {
                     ["HCS record", funded ? `#${advance.funding?.hcsSequenceNumber}` : "Ready"]
                   ]}
                   status={
-                    funded ? (demo ? "Simulated" : "Confirmed") : advance ? "Ready" : "Waiting"
+                    funded
+                      ? fundingSimulated
+                        ? "Simulated"
+                        : "Consensus SUCCESS"
+                      : advance
+                        ? "Ready"
+                        : "Waiting"
                   }
                   title="Bounded payment"
                 />
@@ -540,7 +677,11 @@ export function App() {
                       <Check aria-hidden="true" size={18} />
                     </span>
                     <div>
-                      <span>Advance authorized</span>
+                      <span>
+                        {selectedAdvanceIsPrivate
+                          ? "Estimated testnet credit line"
+                          : "Advance authorized"}
+                      </span>
                       <strong>{usd(advance.authorization.amountMinor)}</strong>
                     </div>
                   </div>
@@ -571,7 +712,11 @@ export function App() {
                 <h2>Proof receipt</h2>
               </div>
               <span className={`summary-status ${funded ? "is-ready" : ""}`}>
-                {funded ? (demo ? "Simulated receipt" : "Consensus confirmed") : "Not generated"}
+                {funded
+                  ? fundingSimulated
+                    ? "Simulated receipt"
+                    : "Consensus SUCCESS"
+                  : "Not generated"}
               </span>
             </div>
 
@@ -582,7 +727,7 @@ export function App() {
                     <dt>Payment transaction</dt>
                     <dd>
                       <a
-                        href={advance.funding.mirrorTransactionUrl}
+                        href={advance.funding.hashscanTransactionUrl}
                         rel="noreferrer"
                         target="_blank"
                       >
@@ -594,7 +739,7 @@ export function App() {
                   <div>
                     <dt>NFT receipt</dt>
                     <dd>
-                      <a href={advance.funding.mirrorTokenUrl} rel="noreferrer" target="_blank">
+                      <a href={advance.funding.hashscanTokenUrl} rel="noreferrer" target="_blank">
                         {advance.funding.noteTokenId}/{advance.funding.noteSerial}
                         <ExternalLink aria-hidden="true" size={13} />
                       </a>
@@ -602,7 +747,12 @@ export function App() {
                   </div>
                   <div>
                     <dt>HCS topic</dt>
-                    <dd>{advance.funding.hcsTopicId}</dd>
+                    <dd>
+                      <a href={advance.funding.hashscanTopicUrl} rel="noreferrer" target="_blank">
+                        {advance.funding.hcsTopicId}
+                        <ExternalLink aria-hidden="true" size={13} />
+                      </a>
+                    </dd>
                   </div>
                   <div>
                     <dt>Advance ID</dt>

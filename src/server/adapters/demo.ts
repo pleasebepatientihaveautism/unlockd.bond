@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import type {
-  AdvanceRequest,
-  FundingResult,
-  MarketSnapshot,
-  RiskDecision,
-  RiskReceipt
+import {
+  type AdvanceRequest,
+  type AssetSymbol,
+  type FundingResult,
+  type MarketSnapshot,
+  marketSnapshotSchema,
+  type RiskDecision,
+  type RiskReceipt
 } from "../../domain/schemas.js";
 import type { FundingPacket, MarketProvider, PaymentProvider, RiskProvider } from "./types.js";
 
@@ -16,9 +18,36 @@ function digest(value: string): string {
 }
 
 export class DemoMarketProvider implements MarketProvider {
-  async snapshot(): Promise<MarketSnapshot> {
+  async snapshot(assetSymbol: AssetSymbol): Promise<MarketSnapshot> {
     const now = Math.floor(Date.now() / 1000);
-    return {
+    if (assetSymbol === "WHOOP") {
+      return marketSnapshotSchema.parse({
+        evidenceType: "PRIVATE_VALUATION",
+        source: "issuer-valuation",
+        network: "private-company",
+        chainId: 0,
+        assetSymbol: "WHOOP",
+        tokenAddress: null,
+        feedAddress: null,
+        priceUsdMinor: 480,
+        priceUpdatedAt: now - 30 * 24 * 60 * 60,
+        oraclePaused: false,
+        sampleCount: 1,
+        realizedVolatilityBps: 0,
+        transferCount24h: 0,
+        subgraphDeployment: "synthetic-409a-demo-v1",
+        indexedBlock: 1,
+        indexedBlockHash: `0x${digest("whoop-synthetic-valuation-evidence")}`,
+        indexedBlockTimestamp: now - 30 * 24 * 60 * 60,
+        hasIndexingErrors: false,
+        valuationBasis: "Synthetic 409A common-share FMV",
+        externalEvidenceLabel: "WHOOP Series G company valuation context",
+        simulated: true
+      });
+    }
+
+    return marketSnapshotSchema.parse({
+      evidenceType: "PUBLIC_MARKET",
       source: "the-graph",
       network: "robinhood",
       chainId: 4663,
@@ -36,8 +65,10 @@ export class DemoMarketProvider implements MarketProvider {
       indexedBlockHash: `0x${digest("unlockd-bond-demo-block")}`,
       indexedBlockTimestamp: now - 18,
       hasIndexingErrors: false,
+      valuationBasis: "Public AAPL market price",
+      externalEvidenceLabel: null,
       simulated: true
-    };
+    });
   }
 
   async ready(): Promise<boolean> {
@@ -51,10 +82,10 @@ export class DemoRiskProvider implements RiskProvider {
     market: MarketSnapshot,
     policyMaxMinor: number
   ): Promise<{ decision: RiskDecision; receipt: RiskReceipt }> {
-    const volatilityHaircutBps = Math.min(
-      2500,
-      Math.floor((market.realizedVolatilityBps ?? 0) / 3)
-    );
+    const privateCompany = market.evidenceType === "PRIVATE_VALUATION";
+    const volatilityHaircutBps = privateCompany
+      ? 0
+      : Math.min(2500, Math.floor((market.realizedVolatilityBps ?? 0) / 3));
     const recommendedAdvanceMinor = Math.min(
       request.request.amountMinor,
       policyMaxMinor,
@@ -67,14 +98,18 @@ export class DemoRiskProvider implements RiskProvider {
         riskBand: volatilityHaircutBps > 1300 ? "MEDIUM" : "LOW",
         recommendedAdvanceMinor,
         volatilityHaircutBps,
-        liquidityHaircutBps: market.transferCount24h < 20 ? 1400 : 700,
+        liquidityHaircutBps: privateCompany ? 6000 : market.transferCount24h < 20 ? 1400 : 700,
         reasonCodes: [
           "SYNTHETIC_PROFILE",
           "TENURE_STABLE",
           "VESTED_VALUE_SUFFICIENT",
-          "MARKET_VOLATILITY_ELEVATED"
+          privateCompany ? "PRIVATE_COMPANY_ILLIQUID" : "MARKET_VOLATILITY_ELEVATED"
         ],
-        assumptions: ["Synthetic hackathon evaluation; not a lending decision"]
+        assumptions: [
+          privateCompany
+            ? "Synthetic 409A common-share FMV with a 60% private-company illiquidity haircut"
+            : "Synthetic hackathon evaluation; not a lending decision"
+        ]
       },
       receipt: {
         requestId: `demo_req_${digest(request.requestId).slice(0, 16)}`,
@@ -103,8 +138,12 @@ export class DemoPaymentProvider implements PaymentProvider {
       hcsTopicId: "0.0.567890",
       hcsSequenceNumber: String(Number.parseInt(digest(`${packet.advanceId}:hcs`).slice(0, 5), 16)),
       consensusTimestamp: new Date().toISOString(),
+      consensusStatus: "SIMULATED",
       mirrorTransactionUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(tx)}`,
       mirrorTokenUrl: "https://hashscan.io/testnet/token/0.0.789012",
+      hashscanTransactionUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(tx)}`,
+      hashscanTokenUrl: "https://hashscan.io/testnet/token/0.0.789012",
+      hashscanTopicUrl: "https://hashscan.io/testnet/topic/0.0.567890",
       simulated: true
     };
   }

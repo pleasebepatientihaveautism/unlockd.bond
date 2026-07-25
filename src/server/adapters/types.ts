@@ -1,5 +1,6 @@
 import type {
   AdvanceRequest,
+  AssetSymbol,
   FundingResult,
   MarketSnapshot,
   RiskDecision,
@@ -7,7 +8,7 @@ import type {
 } from "../../domain/schemas.js";
 
 export interface MarketProvider {
-  snapshot(assetSymbol: "AAPL"): Promise<MarketSnapshot>;
+  snapshot(assetSymbol: AssetSymbol): Promise<MarketSnapshot>;
   ready(): Promise<boolean>;
 }
 
