@@ -4,6 +4,7 @@ import {
   DemoPaymentProvider,
   DemoRiskProvider
 } from "../src/server/adapters/demo.js";
+import { encodeMetadata } from "../src/server/adapters/hedera.js";
 import type { PaymentProvider } from "../src/server/adapters/types.js";
 import type { AppConfig } from "../src/server/config.js";
 import { UnlockdBondService } from "../src/server/service.js";
@@ -26,6 +27,27 @@ function hederaDemo(payment: PaymentProvider) {
 }
 
 describe("Hedera consensus funding gate", () => {
+  it("encodes a deterministic privacy-safe NFT commitment below Hedera's 100-byte limit", () => {
+    const packet = {
+      advanceId: `ub_${"a".repeat(32)}`,
+      recipientAccountId: "0.0.9750175",
+      amountTinybar: 1_000_000n,
+      employeeCommitment: `sha256:${"b".repeat(64)}`,
+      decisionCommitment: `sha256:${"c".repeat(64)}`,
+      marketCommitment: `sha256:${"d".repeat(64)}`,
+      graphBlock: 1,
+      graphDeployment: "synthetic-demo",
+      zeroGRequestId: "demo-request",
+      zeroGProvider: "demo-provider",
+      zeroGTeeVerified: false
+    };
+    const metadata = encodeMetadata(packet);
+    expect(metadata).toHaveLength(49);
+    expect(metadata[0]).toBe(1);
+    expect(encodeMetadata(packet)).toEqual(metadata);
+    expect(new TextDecoder().decode(metadata)).not.toContain(packet.advanceId);
+  });
+
   it("never marks an advance FUNDED from a simulated receipt", async () => {
     const instance = hederaDemo(new DemoPaymentProvider());
     const evaluated = await instance.evaluate(requestFixture());

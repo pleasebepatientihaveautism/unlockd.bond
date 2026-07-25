@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
+import "dotenv/config";
 import { fundingResultSchema } from "../src/domain/schemas.js";
 
 const baseUrl = process.env.UNLOCKD_API_URL ?? "http://localhost:3000";

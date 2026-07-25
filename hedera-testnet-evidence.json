@@ -1,0 +1,19 @@
+{
+  "network": "testnet",
+  "operatorAccountId": "0.0.9750175",
+  "treasuryAccountId": "0.0.9751835",
+  "poolAccountId": "0.0.9751836",
+  "lifecycleTopicId": "0.0.9751837",
+  "advanceNoteTokenId": "0.0.9752761",
+  "publicEvidence": {
+    "operator": "https://hashscan.io/testnet/account/0.0.9750175",
+    "treasury": "https://hashscan.io/testnet/account/0.0.9751835",
+    "pool": "https://hashscan.io/testnet/account/0.0.9751836",
+    "topic": "https://hashscan.io/testnet/topic/0.0.9751837",
+    "token": "https://hashscan.io/testnet/token/0.0.9752761",
+    "mirrorTopicMessages": "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.9751837/messages",
+    "mirrorToken": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761"
+  },
+  "generatedAt": "2026-07-25T21:44:01.400Z",
+  "warning": "Hedera Testnet demo infrastructure only; not stock, collateral, or a legal receivable."
+}
