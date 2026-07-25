@@ -9,7 +9,7 @@ const optionalString = z.preprocess(
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
-  APP_MODE: z.enum(["demo", "live"]).default("demo"),
+  APP_MODE: z.enum(["demo", "hedera-demo", "live"]).default("demo"),
   PUBLIC_BASE_URL: z.url().default("http://localhost:5173"),
   ALLOWED_ORIGINS: z.string().default("http://localhost:5173,http://localhost:3000"),
   DATABASE_URL: optionalUrl,
@@ -40,7 +40,7 @@ const schema = z.object({
 });
 
 export type AppConfig = z.infer<typeof schema> & {
-  mode: "demo" | "live";
+  mode: "demo" | "hedera-demo" | "live";
   allowedOrigins: string[];
 };
 
@@ -53,12 +53,8 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       .map((origin) => origin.trim())
       .filter(Boolean)
   };
-  if (config.mode === "live") {
-    const required = [
-      "DATABASE_URL",
-      "GRAPH_ENDPOINT",
-      "GRAPH_API_KEY",
-      "ZEROG_API_KEY",
+  if (config.mode !== "demo") {
+    const hederaRequired = [
       "HEDERA_OPERATOR_ID",
       "HEDERA_OPERATOR_KEY",
       "HEDERA_TREASURY_ID",
@@ -68,6 +64,13 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       "HEDERA_TOPIC_ID",
       "HEDERA_TOKEN_ID"
     ] as const;
+    const missingHedera = hederaRequired.filter((key) => !config[key]);
+    if (missingHedera.length > 0) {
+      throw new Error(`HEDERA_CONFIG_MISSING:${missingHedera.join(",")}`);
+    }
+  }
+  if (config.mode === "live") {
+    const required = ["DATABASE_URL", "GRAPH_ENDPOINT", "GRAPH_API_KEY", "ZEROG_API_KEY"] as const;
     const missing = required.filter((key) => !config[key]);
     if (missing.length > 0) throw new Error(`LIVE_CONFIG_MISSING:${missing.join(",")}`);
   }

@@ -106,15 +106,37 @@ There is no fallback to `verified` or `standard`.
 
 ### 3. Hedera
 
-Create a funded testnet operator/treasury, a supply key, and a pool account.
-Provision the HCS topic and HTS collection:
+With a funded Testnet operator, the resumable bootstrap creates distinct
+treasury, pool, and NFT supply keys; creates funded treasury/pool accounts; then
+creates and associates the HCS topic and HTS collection:
 
 ```bash
 npm run hedera:provision
 ```
 
-`HEDERA_POOL_KEY` is used only by provisioning to associate the NFT and must not
-be present in the runtime environment.
+The script reads the 24-word operator mnemonic from a hidden TTY prompt, verifies
+the derived public key against Mirror Node before spending, and never stores the
+mnemonic. Runtime material is written atomically to ignored
+`.env.hedera.local` with file mode `0600`; public IDs and links are written to
+`hedera-testnet-evidence.json`. The bootstrap is resumable after a partial
+network failure.
+
+For an honest hackathon flow with synthetic market/risk evaluation but real
+Hedera settlement:
+
+```bash
+npm run dev:hedera
+npm run hedera:demo
+npm run hedera:verify
+```
+
+`hedera:demo` executes a $10-presentation-value advance to the operator account.
+`hedera:verify` independently checks the payment `SUCCESS`, NFT owner, and exact
+`ADVANCE_FUNDED` HCS message through Mirror Node. The public result is saved in
+`hedera-demo-receipt.json`.
+
+`HEDERA_POOL_KEY` is used only by provisioning for token association and is not
+read by the application runtime.
 
 The live funding adapter:
 

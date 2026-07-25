@@ -138,8 +138,12 @@ export class DemoPaymentProvider implements PaymentProvider {
       hcsTopicId: "0.0.567890",
       hcsSequenceNumber: String(Number.parseInt(digest(`${packet.advanceId}:hcs`).slice(0, 5), 16)),
       consensusTimestamp: new Date().toISOString(),
+      consensusStatus: "SIMULATED",
       mirrorTransactionUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(tx)}`,
       mirrorTokenUrl: "https://hashscan.io/testnet/token/0.0.789012",
+      hashscanTransactionUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(tx)}`,
+      hashscanTokenUrl: "https://hashscan.io/testnet/token/0.0.789012",
+      hashscanTopicUrl: "https://hashscan.io/testnet/topic/0.0.567890",
       simulated: true
     };
   }

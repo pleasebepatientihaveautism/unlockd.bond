@@ -258,8 +258,11 @@ export function App() {
     }
   }
 
-  const demo = advance?.mode !== "live";
-  const funded = advance?.state === "FUNDED";
+  const fundingSimulated = advance?.funding?.simulated ?? false;
+  const funded =
+    advance?.state === "FUNDED" &&
+    Boolean(advance.funding) &&
+    (advance.funding?.consensusStatus === "SUCCESS" || fundingSimulated);
   const authorized = advance?.state === "AUTHORIZED";
   const verifiedCount = funded ? 4 : authorized ? 3 : advance ? 2 : 1;
 
@@ -622,7 +625,9 @@ export function App() {
                           ["Deployment", advance?.market.subgraphDeployment ?? "—"]
                         ]
                   }
-                  status={advance ? (demo ? "Simulated" : "Verified") : "Waiting"}
+                  status={
+                    advance ? (advance.market.simulated ? "Simulated" : "Verified") : "Waiting"
+                  }
                   title={
                     selectedAdvanceIsPrivate ? "Private valuation evidence" : "Market evidence"
                   }
@@ -653,7 +658,13 @@ export function App() {
                     ["HCS record", funded ? `#${advance.funding?.hcsSequenceNumber}` : "Ready"]
                   ]}
                   status={
-                    funded ? (demo ? "Simulated" : "Confirmed") : advance ? "Ready" : "Waiting"
+                    funded
+                      ? fundingSimulated
+                        ? "Simulated"
+                        : "Consensus SUCCESS"
+                      : advance
+                        ? "Ready"
+                        : "Waiting"
                   }
                   title="Bounded payment"
                 />
@@ -701,7 +712,11 @@ export function App() {
                 <h2>Proof receipt</h2>
               </div>
               <span className={`summary-status ${funded ? "is-ready" : ""}`}>
-                {funded ? (demo ? "Simulated receipt" : "Consensus confirmed") : "Not generated"}
+                {funded
+                  ? fundingSimulated
+                    ? "Simulated receipt"
+                    : "Consensus SUCCESS"
+                  : "Not generated"}
               </span>
             </div>
 
@@ -712,7 +727,7 @@ export function App() {
                     <dt>Payment transaction</dt>
                     <dd>
                       <a
-                        href={advance.funding.mirrorTransactionUrl}
+                        href={advance.funding.hashscanTransactionUrl}
                         rel="noreferrer"
                         target="_blank"
                       >
@@ -724,7 +739,7 @@ export function App() {
                   <div>
                     <dt>NFT receipt</dt>
                     <dd>
-                      <a href={advance.funding.mirrorTokenUrl} rel="noreferrer" target="_blank">
+                      <a href={advance.funding.hashscanTokenUrl} rel="noreferrer" target="_blank">
                         {advance.funding.noteTokenId}/{advance.funding.noteSerial}
                         <ExternalLink aria-hidden="true" size={13} />
                       </a>
@@ -732,7 +747,12 @@ export function App() {
                   </div>
                   <div>
                     <dt>HCS topic</dt>
-                    <dd>{advance.funding.hcsTopicId}</dd>
+                    <dd>
+                      <a href={advance.funding.hashscanTopicUrl} rel="noreferrer" target="_blank">
+                        {advance.funding.hcsTopicId}
+                        <ExternalLink aria-hidden="true" size={13} />
+                      </a>
+                    </dd>
                   </div>
                   <div>
                     <dt>Advance ID</dt>

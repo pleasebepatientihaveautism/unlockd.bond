@@ -24,6 +24,7 @@ interface HederaConfig {
   tokenId: string;
   mirrorUrl: string;
   treasuryReserveTinybar: number;
+  requireTeeVerification: boolean;
 }
 
 function privateKey(value: string): PrivateKey {
@@ -69,7 +70,9 @@ export class HederaPaymentProvider implements PaymentProvider {
   }
 
   async fund(packet: FundingPacket): Promise<FundingResult> {
-    if (!packet.zeroGTeeVerified) throw new Error("TEE_VERIFICATION_REQUIRED");
+    if (this.config.requireTeeVerification && !packet.zeroGTeeVerified) {
+      throw new Error("TEE_VERIFICATION_REQUIRED");
+    }
     const recipient = AccountId.fromString(packet.recipientAccountId);
     const balance = await new AccountBalanceQuery()
       .setAccountId(this.treasuryId)
@@ -90,7 +93,7 @@ export class HederaPaymentProvider implements PaymentProvider {
       graphDeployment: packet.graphDeployment,
       zeroGRequestId: packet.zeroGRequestId,
       zeroGProvider: packet.zeroGProvider,
-      zeroGTeeVerified: true
+      zeroGTeeVerified: packet.zeroGTeeVerified
     };
     const authorized = await new TopicMessageSubmitTransaction()
       .setTopicId(this.topicId)
@@ -152,8 +155,12 @@ export class HederaPaymentProvider implements PaymentProvider {
       hcsTopicId: this.topicId.toString(),
       hcsSequenceNumber: fundedReceipt.topicSequenceNumber?.toString(),
       consensusTimestamp: transferRecord.consensusTimestamp.toString(),
+      consensusStatus: "SUCCESS",
       mirrorTransactionUrl: `${this.config.mirrorUrl}/api/v1/transactions/${encodeURIComponent(mirrorTransactionId)}`,
       mirrorTokenUrl: `${this.config.mirrorUrl}/api/v1/tokens/${this.tokenId.toString()}/nfts/${serial.toString()}`,
+      hashscanTransactionUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(transactionId)}`,
+      hashscanTokenUrl: `https://hashscan.io/testnet/token/${this.tokenId.toString()}`,
+      hashscanTopicUrl: `https://hashscan.io/testnet/topic/${this.topicId.toString()}`,
       simulated: false
     });
   }

@@ -140,8 +140,12 @@ export const fundingResultSchema = z
     hcsTopicId: z.string().min(3).max(80),
     hcsSequenceNumber: z.string().regex(/^\d+$/),
     consensusTimestamp: z.string().min(3).max(80),
+    consensusStatus: z.enum(["SUCCESS", "SIMULATED"]),
     mirrorTransactionUrl: z.string().url(),
     mirrorTokenUrl: z.string().url(),
+    hashscanTransactionUrl: z.string().url(),
+    hashscanTokenUrl: z.string().url(),
+    hashscanTopicUrl: z.string().url(),
     simulated: z.boolean()
   })
   .strict();

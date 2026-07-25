@@ -108,7 +108,7 @@ export function createApp(deps: AppDependencies) {
   app.get("/api/config", (_request, response) => {
     response.json({
       mode: deps.config.mode,
-      syntheticOnly: deps.config.mode === "demo",
+      syntheticOnly: deps.config.mode !== "live",
       asset: "AAPL",
       network: "Hedera Testnet",
       fixedCapMinor: deps.config.POLICY_FIXED_CAP_MINOR

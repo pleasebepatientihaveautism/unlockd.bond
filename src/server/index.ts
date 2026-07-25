@@ -42,14 +42,14 @@ const liveValue = (value: string | undefined, name: string): string => {
   return value;
 };
 const market =
-  config.mode === "demo"
+  config.mode !== "live"
     ? new DemoMarketProvider()
     : new GraphMarketProvider({
         endpoint: liveValue(config.GRAPH_ENDPOINT, "GRAPH_ENDPOINT"),
         apiKey: liveValue(config.GRAPH_API_KEY, "GRAPH_API_KEY")
       });
 const risk =
-  config.mode === "demo"
+  config.mode !== "live"
     ? new DemoRiskProvider()
     : new ZeroGRiskProvider({
         apiKey: liveValue(config.ZEROG_API_KEY, "ZEROG_API_KEY"),
@@ -69,7 +69,8 @@ const payment =
         topicId: liveValue(config.HEDERA_TOPIC_ID, "HEDERA_TOPIC_ID"),
         tokenId: liveValue(config.HEDERA_TOKEN_ID, "HEDERA_TOKEN_ID"),
         mirrorUrl: config.HEDERA_MIRROR_URL,
-        treasuryReserveTinybar: config.TREASURY_RESERVE_TINYBAR
+        treasuryReserveTinybar: config.TREASURY_RESERVE_TINYBAR,
+        requireTeeVerification: config.mode === "live"
       });
 const service = new UnlockdBondService({ config, store, market, risk, payment });
 const app = createApp({ config, logger, service });

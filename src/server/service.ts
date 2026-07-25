@@ -140,8 +140,11 @@ export class UnlockdBondService {
         zeroGProvider: record.riskReceipt.provider,
         zeroGTeeVerified: record.riskReceipt.teeVerified
       });
-      if (this.deps.config.mode === "live" && result.simulated) {
-        throw new Error("LIVE_HEDERA_RECEIPT_REQUIRED");
+      if (
+        this.deps.config.mode !== "demo" &&
+        (result.simulated || result.consensusStatus !== "SUCCESS")
+      ) {
+        throw new Error("HEDERA_CONSENSUS_SUCCESS_REQUIRED");
       }
       const completed = await this.deps.store.completeFunding(advanceId, result);
       return { advance: toPublicAdvance(completed), idempotentReplay: false };
