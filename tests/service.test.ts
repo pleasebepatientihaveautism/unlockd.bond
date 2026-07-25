@@ -6,7 +6,7 @@ import {
 } from "../src/server/adapters/demo.js";
 import { UnlockdBondService } from "../src/server/service.js";
 import { MemoryAdvanceStore } from "../src/server/store.js";
-import { requestFixture, testConfig } from "./fixtures.js";
+import { privateRequestFixture, requestFixture, testConfig } from "./fixtures.js";
 
 function service() {
   return new UnlockdBondService({
@@ -39,6 +39,23 @@ describe("unlockd.bond service", () => {
     expect(second.idempotentReplay).toBe(true);
     expect(second.advance.advanceId).toBe(first.advance.advanceId);
     expect(second.confirmationToken).toBe(first.confirmationToken);
+  });
+
+  it("evaluates a private WHOOP option grant with private-company evidence", async () => {
+    const result = await service().evaluate(privateRequestFixture());
+    expect(result.advance.state).toBe("AUTHORIZED");
+    expect(result.advance.market).toMatchObject({
+      assetSymbol: "WHOOP",
+      evidenceType: "PRIVATE_VALUATION",
+      source: "issuer-valuation",
+      valuationBasis: "Synthetic 409A common-share FMV"
+    });
+    expect(result.advance.authorization).toMatchObject({
+      amountMinor: 150_000,
+      eligibleEquityValueMinor: 2_160_000,
+      marketHaircutBps: 7000
+    });
+    expect(result.advance.risk.reasonCodes).toContain("PRIVATE_COMPANY_ILLIQUID");
   });
 
   it("funds exactly the authorized demo record", async () => {

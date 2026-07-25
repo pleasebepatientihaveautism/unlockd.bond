@@ -30,6 +30,7 @@ export const requestFixture = (overrides: Partial<AdvanceRequest> = {}): Advance
 export const marketFixture = (overrides: Partial<MarketSnapshot> = {}): MarketSnapshot => {
   const now = Math.floor(Date.now() / 1000);
   return {
+    evidenceType: "PUBLIC_MARKET",
     source: "the-graph",
     network: "robinhood",
     chainId: 4663,
@@ -47,7 +48,50 @@ export const marketFixture = (overrides: Partial<MarketSnapshot> = {}): MarketSn
     indexedBlockHash: `0x${"b".repeat(64)}`,
     indexedBlockTimestamp: now - 8,
     hasIndexingErrors: false,
+    valuationBasis: "Public AAPL market price",
+    externalEvidenceLabel: null,
     simulated: false,
+    ...overrides
+  };
+};
+
+export const privateRequestFixture = (overrides: Partial<AdvanceRequest> = {}): AdvanceRequest =>
+  requestFixture({
+    grant: {
+      assetSymbol: "WHOOP",
+      grantType: "OPTION",
+      vestedUnits: "20000.000000",
+      strikePriceMinor: 120,
+      transferRestricted: true,
+      attestationCommitment: `sha256:${"a".repeat(64)}`
+    },
+    ...overrides
+  });
+
+export const privateMarketFixture = (overrides: Partial<MarketSnapshot> = {}): MarketSnapshot => {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    evidenceType: "PRIVATE_VALUATION",
+    source: "issuer-valuation",
+    network: "private-company",
+    chainId: 0,
+    assetSymbol: "WHOOP",
+    tokenAddress: null,
+    feedAddress: null,
+    priceUsdMinor: 480,
+    priceUpdatedAt: now - 30 * 24 * 60 * 60,
+    oraclePaused: false,
+    sampleCount: 1,
+    realizedVolatilityBps: 0,
+    transferCount24h: 0,
+    subgraphDeployment: "synthetic-409a-demo-v1",
+    indexedBlock: 1,
+    indexedBlockHash: `0x${"c".repeat(64)}`,
+    indexedBlockTimestamp: now - 30 * 24 * 60 * 60,
+    hasIndexingErrors: false,
+    valuationBasis: "Synthetic 409A common-share FMV",
+    externalEvidenceLabel: "WHOOP Series G company valuation context",
+    simulated: true,
     ...overrides
   };
 };

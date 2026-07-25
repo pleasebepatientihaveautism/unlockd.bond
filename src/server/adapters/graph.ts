@@ -1,4 +1,8 @@
-import { type MarketSnapshot, marketSnapshotSchema } from "../../domain/schemas.js";
+import {
+  type AssetSymbol,
+  type MarketSnapshot,
+  marketSnapshotSchema
+} from "../../domain/schemas.js";
 import type { MarketProvider } from "./types.js";
 
 interface GraphConfig {
@@ -64,7 +68,10 @@ function volatilityBps(prices: number[]): number | null {
 export class GraphMarketProvider implements MarketProvider {
   constructor(private readonly config: GraphConfig) {}
 
-  async snapshot(assetSymbol: "AAPL"): Promise<MarketSnapshot> {
+  async snapshot(assetSymbol: AssetSymbol): Promise<MarketSnapshot> {
+    if (assetSymbol !== "AAPL") {
+      throw new Error("PRIVATE_ASSET_GRAPH_UNSUPPORTED");
+    }
     const now = Math.floor(Date.now() / 1000);
     const response = await fetch(this.config.endpoint, {
       method: "POST",
@@ -88,6 +95,7 @@ export class GraphMarketProvider implements MarketProvider {
       Number.parseInt(sample.priceUsdMinor, 10)
     );
     return marketSnapshotSchema.parse({
+      evidenceType: "PUBLIC_MARKET",
       source: "the-graph",
       network: "robinhood",
       chainId: 4663,
@@ -105,6 +113,8 @@ export class GraphMarketProvider implements MarketProvider {
       indexedBlockHash: meta.block.hash,
       indexedBlockTimestamp: meta.block.timestamp,
       hasIndexingErrors: meta.hasIndexingErrors,
+      valuationBasis: "Public AAPL market price",
+      externalEvidenceLabel: null,
       simulated: false
     });
   }

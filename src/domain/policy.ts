@@ -42,11 +42,16 @@ export function authorizeAdvance(
   if (market.assetSymbol !== request.grant.assetSymbol) {
     throw new PolicyError("ASSET_MISMATCH", "Market evidence does not match the request");
   }
-  const graphAge = nowSeconds - Math.min(market.priceUpdatedAt, market.indexedBlockTimestamp);
-  if (graphAge < 0 || graphAge > config.maxGraphAgeSeconds) {
-    throw new PolicyError("GRAPH_DATA_STALE", "Market evidence is stale");
+  const evidenceAge = nowSeconds - Math.min(market.priceUpdatedAt, market.indexedBlockTimestamp);
+  const maxEvidenceAgeSeconds =
+    market.evidenceType === "PRIVATE_VALUATION" ? 365 * 24 * 60 * 60 : config.maxGraphAgeSeconds;
+  if (evidenceAge < 0 || evidenceAge > maxEvidenceAgeSeconds) {
+    throw new PolicyError(
+      market.evidenceType === "PRIVATE_VALUATION" ? "PRIVATE_VALUATION_STALE" : "GRAPH_DATA_STALE",
+      "Market evidence is stale"
+    );
   }
-  if (market.sampleCount < config.minGraphSamples) {
+  if (market.evidenceType === "PUBLIC_MARKET" && market.sampleCount < config.minGraphSamples) {
     throw new PolicyError("INSUFFICIENT_MARKET_HISTORY", "Not enough live samples");
   }
   if (risk.decision === "reject" || risk.recommendedAdvanceMinor <= 0) {
