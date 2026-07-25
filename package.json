@@ -1,0 +1,57 @@
+{
+  "name": "unlockd-bond",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:web": "vite",
+    "dev:server": "tsx watch src/server/index.ts",
+    "build": "tsc -b && vite build",
+    "start": "NODE_ENV=production tsx src/server/index.ts",
+    "lint": "biome check src tests scripts",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "node scripts/migrate.mjs",
+    "hedera:provision": "tsx scripts/provision-hedera.ts"
+  },
+  "dependencies": {
+    "@fontsource/dm-mono": "^5.2.6",
+    "@fontsource/dm-sans": "^5.2.6",
+    "@hashgraph/sdk": "^2.81.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "pg": "^8.16.3",
+    "pino": "^9.9.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsx": "^4.21.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.8",
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@types/supertest": "^6.0.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "supertest": "^7.1.4",
+    "typescript": "~5.9.3",
+    "vite": "^8.1.5",
+    "vitest": "3.2.6"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.4",
+    "protobufjs": "8.7.1",
+    "brace-expansion": "5.0.8"
+  }
+}
