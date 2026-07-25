@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: unlockd_bond
+      POSTGRES_USER: unlockd_bond
+      POSTGRES_PASSWORD: local-development-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unlockd_bond"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - unlockd-bond-db:/var/lib/postgresql/data
+  app:
+    build: .
+    command: ["sh", "-c", "npm run db:migrate && npm start"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://unlockd_bond:local-development-only@postgres:5432/unlockd_bond
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+volumes:
+  unlockd-bond-db:
