@@ -3,6 +3,7 @@ import {
   type AdvanceRequest,
   type AssetSymbol,
   type FundingResult,
+  type LiquidationResult,
   type MarketSnapshot,
   marketSnapshotSchema,
   type PrivateCompanyListing,
@@ -12,6 +13,8 @@ import {
 import type {
   FundingPacket,
   FundingProgressRecorder,
+  LiquidationPacket,
+  LiquidationProgressRecorder,
   MarketProvider,
   PaymentProvider,
   RepaymentPacket,
@@ -176,19 +179,21 @@ export class DemoPaymentProvider implements PaymentProvider {
     const transactions = {
       authorization: simulatedTransaction("authorization"),
       noteMint: simulatedTransaction("note-mint"),
+      collateralMint: simulatedTransaction("collateral-mint"),
       settlement: simulatedTransaction("settlement"),
       fundedEvent: simulatedTransaction("funded-event")
     };
     await recordProgress?.({
-      version: 2,
+      version: 3,
       stage: "FUNDED",
       transactions,
       noteSerial: serial,
+      collateralSerial: String(Number(serial) + 1),
       authorizationSequenceNumber,
       fundedSequenceNumber
     });
     return {
-      version: 2,
+      version: 3,
       asset: {
         tokenId: "0.0.789011",
         name: "USDC DEMO",
@@ -203,6 +208,14 @@ export class DemoPaymentProvider implements PaymentProvider {
       note: {
         tokenId: "0.0.789012",
         serial,
+        mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      collateral: {
+        tokenId: "0.0.789013",
+        serial: String(Number(serial) + 1),
+        escrowAccountId: "0.0.789014",
+        label: "Synthetic demo collateral — no real shares or value",
         mirrorUrl: "https://testnet.mirrornode.hedera.com/",
         hashscanUrl: "https://hashscan.io/testnet"
       },
@@ -230,27 +243,39 @@ export class DemoPaymentProvider implements PaymentProvider {
       hashscanUrl: "https://hashscan.io/testnet"
     });
     const authorizationSequenceNumber = String(baseTimestamp);
-    const repaidSequenceNumber = String(baseTimestamp + 1);
-    const transactions = {
+    const completionSequenceNumber = String(baseTimestamp + 1);
+    const full = packet.remainingPrincipalMinor === 0;
+    const transactions: {
+      authorization: ReturnType<typeof simulatedTransaction>;
+      settlement: ReturnType<typeof simulatedTransaction>;
+      noteBurn?: ReturnType<typeof simulatedTransaction>;
+      completionEvent: ReturnType<typeof simulatedTransaction>;
+    } = {
       authorization: simulatedTransaction("repayment-authorization"),
       settlement: simulatedTransaction("repayment-settlement"),
-      noteBurn: simulatedTransaction("note-burn"),
-      repaidEvent: simulatedTransaction("repaid-event")
+      completionEvent: simulatedTransaction(full ? "repaid-event" : "partially-repaid-event")
     };
+    if (full) transactions.noteBurn = simulatedTransaction("note-burn");
     await recordProgress?.({
       version: 1,
       repaymentId: packet.repaymentId,
       stage: "REPAID",
-      transactions,
+      transactions: {
+        authorization: transactions.authorization,
+        settlement: transactions.settlement,
+        noteBurn: transactions.noteBurn,
+        repaidEvent: transactions.completionEvent
+      },
       authorizationSequenceNumber,
-      repaidSequenceNumber
+      repaidSequenceNumber: completionSequenceNumber
     });
     return {
-      version: 1,
+      version: 2,
       repaymentId: packet.repaymentId,
       advanceId: packet.advanceId,
       payerAccountId: packet.payerAccountId,
       treasuryAccountId: "0.0.789010",
+      kind: full ? "FULL" : "PARTIAL",
       asset: {
         tokenId: "0.0.789011",
         name: "USDC DEMO",
@@ -265,18 +290,79 @@ export class DemoPaymentProvider implements PaymentProvider {
       note: {
         tokenId: packet.noteTokenId,
         serial: packet.noteSerial,
-        retired: true,
+        retired: full,
+        mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      collateral: {
+        tokenId: packet.collateralTokenId ?? "0.0.789013",
+        serial: packet.collateralSerial ?? "1",
+        released: full,
         mirrorUrl: "https://testnet.mirrornode.hedera.com/",
         hashscanUrl: "https://hashscan.io/testnet"
       },
       topic: {
         topicId: "0.0.567890",
         authorizationSequenceNumber,
-        repaidSequenceNumber,
+        completionSequenceNumber,
         hashscanUrl: "https://hashscan.io/testnet"
       },
       transactions,
+      previousPrincipalMinor: packet.previousPrincipalMinor,
+      remainingPrincipalMinor: packet.remainingPrincipalMinor,
+      simulated: true
+    };
+  }
+
+  async liquidate(
+    packet: LiquidationPacket,
+    recordProgress?: LiquidationProgressRecorder
+  ): Promise<LiquidationResult> {
+    const simulatedTransaction = (stage: string) => ({
+      transactionId: `simulated:${stage}:${digest(packet.liquidationId).slice(0, 16)}`,
+      consensusTimestamp: new Date().toISOString(),
+      consensusStatus: "SIMULATED" as const,
+      mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+      hashscanUrl: "https://hashscan.io/testnet"
+    });
+    const transactions = {
+      authorization: simulatedTransaction("liquidation-authorization"),
+      settlement: simulatedTransaction("liquidation-settlement"),
+      noteBurn: simulatedTransaction("liquidation-note-burn"),
+      liquidatedEvent: simulatedTransaction("liquidated-event")
+    };
+    await recordProgress?.({
+      version: 1,
+      liquidationId: packet.liquidationId,
+      stage: "LIQUIDATED",
+      transactions,
+      authorizationSequenceNumber: "1",
+      liquidatedSequenceNumber: "2"
+    });
+    return {
+      version: 1,
+      liquidationId: packet.liquidationId,
+      advanceId: packet.advanceId,
+      emulatedPriceMinor: packet.emulatedPriceMinor,
+      liquidationPriceMinor: packet.liquidationPriceMinor,
       remainingPrincipalMinor: 0,
+      collateral: {
+        tokenId: packet.collateralTokenId,
+        serial: packet.collateralSerial,
+        escrowAccountId: packet.collateralEscrowAccountId,
+        label: "Synthetic demo collateral — no real shares or value",
+        mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+        hashscanUrl: "https://hashscan.io/testnet",
+        transferredToPool: true
+      },
+      note: {
+        tokenId: packet.noteTokenId,
+        serial: packet.noteSerial,
+        retired: true,
+        mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      transactions,
       simulated: true
     };
   }

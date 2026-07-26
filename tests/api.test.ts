@@ -146,6 +146,67 @@ describe("HTTP API", () => {
     expect(replay.body.idempotentReplay).toBe(true);
   });
 
+  it("isolates session positions and supports partial repayment plus demo liquidation", async () => {
+    const server = app();
+    const owner = request.agent(server);
+    const stranger = request.agent(server);
+    const input = requestFixture({
+      requestId: "ub_req_position_lifecycle_123",
+      request: { amountMinor: 100_00, currency: "USD", termDays: 30 }
+    });
+    const evaluated = await owner
+      .post("/api/advances/evaluate")
+      .set("Idempotency-Key", input.requestId)
+      .send(input)
+      .expect(201);
+    await owner
+      .post(`/api/advances/${evaluated.body.advance.advanceId}/fund`)
+      .send({ confirmationToken: evaluated.body.confirmationToken })
+      .expect(200);
+
+    const listed = await owner.get("/api/positions?status=open").expect(200);
+    expect(listed.body.positions).toHaveLength(1);
+    expect(listed.body.positions[0]).toMatchObject({
+      remainingPrincipalMinor: 100_00,
+      grantSummary: { grantType: "RSU" }
+    });
+    await stranger.get(`/api/positions/${evaluated.body.advance.advanceId}`).expect(404);
+
+    const repaymentId = "ub_rp_position_partial_123";
+    const partial = await owner
+      .post(`/api/positions/${evaluated.body.advance.advanceId}/repay`)
+      .set("Idempotency-Key", repaymentId)
+      .send({ repaymentId, amountMinor: 40_00 })
+      .expect(200);
+    expect(partial.body.position).toMatchObject({
+      remainingPrincipalMinor: 60_00,
+      advance: { state: "FUNDED" }
+    });
+    expect(partial.body.position.liquidationPriceMinor).toBeLessThan(
+      listed.body.positions[0].liquidationPriceMinor
+    );
+
+    const emulatedPriceMinor = partial.body.position.liquidationPriceMinor - 1;
+    const preview = await owner
+      .post(`/api/positions/${evaluated.body.advance.advanceId}/liquidation/preview`)
+      .send({ emulatedPriceMinor })
+      .expect(200);
+    expect(preview.body.preview.wouldLiquidate).toBe(true);
+
+    const liquidationId = "ub_liq_position_demo_123";
+    const liquidated = await owner
+      .post(`/api/positions/${evaluated.body.advance.advanceId}/liquidate`)
+      .set("Idempotency-Key", liquidationId)
+      .send({ liquidationId, emulatedPriceMinor })
+      .expect(200);
+    expect(liquidated.body.position).toMatchObject({
+      remainingPrincipalMinor: 0,
+      advance: { state: "LIQUIDATED" }
+    });
+    const closed = await owner.get("/api/positions?status=closed").expect(200);
+    expect(closed.body.positions).toHaveLength(1);
+  });
+
   it("rejects a repayment idempotency mismatch", async () => {
     await request(app())
       .post("/api/advances/ub_missing_12345678/repay")
@@ -166,6 +227,16 @@ describe("HTTP API", () => {
       .send(input)
       .expect(403);
     expect(response.body.error).toBe("ORIGIN_NOT_ALLOWED");
+  });
+
+  it("allows loopback development origins on dynamic Vite ports", async () => {
+    const input = requestFixture();
+    await request(app())
+      .post("/api/advances/evaluate")
+      .set("Origin", "http://localhost:5175")
+      .set("Idempotency-Key", input.requestId)
+      .send(input)
+      .expect(201);
   });
 
   it("rejects attempts to override the server-selected settlement recipient", async () => {

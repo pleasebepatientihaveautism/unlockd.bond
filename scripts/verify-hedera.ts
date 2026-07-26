@@ -1,7 +1,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "dotenv";
-import { fundingResultV2Schema, repaymentResultSchema } from "../src/domain/schemas.js";
+import {
+  fundingResultV2Schema,
+  fundingResultV3Schema,
+  repaymentResultSchema
+} from "../src/domain/schemas.js";
 
 const mirrorUrl = "https://testnet.mirrornode.hedera.com";
 const env = parse(readFileSync(path.resolve(".env.hedera.local"), "utf8"));
@@ -12,7 +16,7 @@ const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
   repayment?: unknown;
   [key: string]: unknown;
 };
-const funding = fundingResultV2Schema.parse(receipt.funding);
+const funding = fundingResultV3Schema.or(fundingResultV2Schema).parse(receipt.funding);
 const repayment = receipt.repayment ? repaymentResultSchema.parse(receipt.repayment) : null;
 if (!receipt.recipientAccountId) throw new Error("RECIPIENT_ACCOUNT_REQUIRED");
 
@@ -58,6 +62,10 @@ const [authorization, noteMint, settlement, fundedEvent] = await Promise.all([
   confirmedTransaction(funding.transactions.settlement.transactionId),
   confirmedTransaction(funding.transactions.fundedEvent.transactionId)
 ]);
+const collateralMint =
+  funding.version === 3
+    ? await confirmedTransaction(funding.transactions.collateralMint.transactionId)
+    : null;
 
 const expectedUnits = Number(funding.asset.amountUnits);
 if (!Number.isSafeInteger(expectedUnits)) throw new Error("STABLE_AMOUNT_OUT_OF_RANGE");
@@ -75,6 +83,33 @@ const issuanceNftTransfer = settlement.nft_transfers?.find(
     entry.receiver_account_id === env.HEDERA_POOL_ID
 );
 if (!issuanceNftTransfer) throw new Error("NOTE_POOL_TRANSFER_NOT_CONFIRMED");
+
+let collateralVerification = null;
+if (funding.version === 3) {
+  const collateralTransfer = settlement.nft_transfers?.find(
+    (entry) =>
+      entry.token_id === funding.collateral.tokenId &&
+      String(entry.serial_number) === funding.collateral.serial &&
+      entry.receiver_account_id === funding.collateral.escrowAccountId
+  );
+  if (!collateralTransfer) throw new Error("COLLATERAL_ESCROW_TRANSFER_NOT_CONFIRMED");
+  const collateralNft = await retry("COLLATERAL_OWNERSHIP", async () => {
+    const response = await fetch(
+      `${mirrorUrl}/api/v1/tokens/${funding.collateral.tokenId}/nfts/${funding.collateral.serial}`
+    );
+    if (!response.ok) return null;
+    const body = (await response.json()) as { account_id?: string; deleted?: boolean };
+    return body.deleted !== true && body.account_id === funding.collateral.escrowAccountId
+      ? body
+      : null;
+  });
+  collateralVerification = {
+    tokenId: funding.collateral.tokenId,
+    serial: funding.collateral.serial,
+    owner: collateralNft.account_id,
+    mintConsensusTimestamp: collateralMint?.consensus_timestamp
+  };
+}
 
 const nft = await retry("NFT_OWNERSHIP", async () => {
   const response = await fetch(
@@ -216,6 +251,7 @@ const verified = {
     transactions: {
       authorization: authorization.consensus_timestamp,
       noteMint: noteMint.consensus_timestamp,
+      ...(collateralMint ? { collateralMint: collateralMint.consensus_timestamp } : {}),
       settlement: settlement.consensus_timestamp,
       fundedEvent: fundedEvent.consensus_timestamp
     },
@@ -229,6 +265,7 @@ const verified = {
       owner: nft.account_id,
       url: funding.note.mirrorUrl
     },
+    collateral: collateralVerification,
     hcs: {
       authorizationSequenceNumber: String(authorizationMessage.sequence_number),
       fundedSequenceNumber: String(fundedMessage.sequence_number)
@@ -240,5 +277,7 @@ writeFileSync(receiptPath, `${JSON.stringify(verified, null, 2)}\n`, "utf8");
 process.stdout.write(
   repayment
     ? "Mirror Node verified issuance and repayment transactions, exact Demo USDC movements, NFT retirement, and all HCS bindings.\n"
-    : "Mirror Node verified four transactions, exact Demo USDC payout, NFT ownership, and both HCS messages.\n"
+    : funding.version === 3
+      ? "Mirror Node verified five transactions, exact Demo USDC payout, Advance Note ownership, collateral escrow ownership, and both HCS messages.\n"
+      : "Mirror Node verified four transactions, exact Demo USDC payout, NFT ownership, and both HCS messages.\n"
 );

@@ -103,6 +103,15 @@ const payment =
         topicId: liveValue(config.HEDERA_TOPIC_ID, "HEDERA_TOPIC_ID"),
         tokenId: liveValue(config.HEDERA_TOKEN_ID, "HEDERA_TOKEN_ID"),
         stableTokenId: liveValue(config.HEDERA_STABLE_TOKEN_ID, "HEDERA_STABLE_TOKEN_ID"),
+        collateralTokenId:
+          config.HEDERA_COLLATERAL_TOKEN_ID ?? liveValue(config.HEDERA_TOKEN_ID, "HEDERA_TOKEN_ID"),
+        escrowId:
+          config.HEDERA_ESCROW_ID ?? liveValue(config.HEDERA_OPERATOR_ID, "HEDERA_OPERATOR_ID"),
+        escrowKey:
+          config.HEDERA_ESCROW_KEY ?? liveValue(config.HEDERA_OPERATOR_KEY, "HEDERA_OPERATOR_KEY"),
+        collateralEnabled: Boolean(
+          config.HEDERA_COLLATERAL_TOKEN_ID && config.HEDERA_ESCROW_ID && config.HEDERA_ESCROW_KEY
+        ),
         recipientId: config.HEDERA_RECIPIENT_ID,
         mirrorUrl: config.HEDERA_MIRROR_URL,
         treasuryStableReserveMinor: config.TREASURY_STABLE_RESERVE_MINOR,

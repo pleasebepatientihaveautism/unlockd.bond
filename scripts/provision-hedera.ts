@@ -24,6 +24,7 @@ const mirrorUrl = "https://testnet.mirrornode.hedera.com";
 const hashscanUrl = "https://hashscan.io/testnet";
 const stableInitialSupply = 1_000_000_000_000_000n;
 const stableCreationOperatorTargetTinybar = 1_620_000_000n;
+const entityCreationFeeBudgetTinybar = 200_000_000;
 const operationalOperatorTargetTinybar = 40_000_000n;
 const operationalTreasuryReserveTinybar = 50_000_000n;
 const operatorIdText = process.env.HEDERA_OPERATOR_ID ?? "0.0.9750175";
@@ -55,6 +56,9 @@ function envText(values: Record<string, string>): string {
     "HEDERA_TOPIC_ID",
     "HEDERA_TOKEN_ID",
     "HEDERA_STABLE_TOKEN_ID",
+    "HEDERA_COLLATERAL_TOKEN_ID",
+    "HEDERA_ESCROW_ID",
+    "HEDERA_ESCROW_KEY",
     "HEDERA_RECIPIENT_ID",
     "HEDERA_MIRROR_URL",
     "POLICY_FIXED_CAP_MINOR",
@@ -170,7 +174,9 @@ function writeEvidence(): void {
     !state.HEDERA_POOL_ID ||
     !state.HEDERA_TOPIC_ID ||
     !state.HEDERA_TOKEN_ID ||
-    !state.HEDERA_STABLE_TOKEN_ID
+    !state.HEDERA_STABLE_TOKEN_ID ||
+    !state.HEDERA_COLLATERAL_TOKEN_ID ||
+    !state.HEDERA_ESCROW_ID
   ) {
     return;
   }
@@ -181,6 +187,13 @@ function writeEvidence(): void {
     poolAccountId: state.HEDERA_POOL_ID,
     lifecycleTopicId: state.HEDERA_TOPIC_ID,
     advanceNoteTokenId: state.HEDERA_TOKEN_ID,
+    collateralEscrowAccountId: state.HEDERA_ESCROW_ID,
+    collateralToken: {
+      tokenId: state.HEDERA_COLLATERAL_TOKEN_ID,
+      name: "unlockd.bond Demo Equity Collateral",
+      symbol: "UBEQ",
+      label: "Synthetic demo collateral — no real shares or value"
+    },
     stableToken: {
       tokenId: state.HEDERA_STABLE_TOKEN_ID,
       name: "USDC DEMO",
@@ -197,6 +210,8 @@ function writeEvidence(): void {
       topic: `${hashscanUrl}/topic/${state.HEDERA_TOPIC_ID}`,
       token: `${hashscanUrl}/token/${state.HEDERA_TOKEN_ID}`,
       stableToken: `${hashscanUrl}/token/${state.HEDERA_STABLE_TOKEN_ID}`,
+      collateralToken: `${hashscanUrl}/token/${state.HEDERA_COLLATERAL_TOKEN_ID}`,
+      collateralEscrow: `${hashscanUrl}/account/${state.HEDERA_ESCROW_ID}`,
       mirrorTopicMessages: `${mirrorUrl}/api/v1/topics/${state.HEDERA_TOPIC_ID}/messages`,
       mirrorToken: `${mirrorUrl}/api/v1/tokens/${state.HEDERA_TOKEN_ID}`
     },
@@ -212,9 +227,18 @@ if (account.deleted || account.account !== operatorIdText || !account.key) {
   throw new Error("OPERATOR_ACCOUNT_INVALID");
 }
 const plannedInitialBalance =
-  (state.HEDERA_TREASURY_ID ? 0 : 300_000_000) + (state.HEDERA_POOL_ID ? 0 : 100_000_000);
+  (state.HEDERA_TREASURY_ID ? 0 : 300_000_000) +
+  (state.HEDERA_POOL_ID ? 0 : 100_000_000) +
+  (state.HEDERA_ESCROW_ID ? 0 : 100_000_000) +
+  (state.HEDERA_TOPIC_ID ? 0 : entityCreationFeeBudgetTinybar) +
+  (state.HEDERA_TOKEN_ID ? 0 : entityCreationFeeBudgetTinybar) +
+  (state.HEDERA_COLLATERAL_TOKEN_ID ? 0 : entityCreationFeeBudgetTinybar);
 if (plannedInitialBalance > 0 && account.balance.balance < plannedInitialBalance + 150_000_000) {
-  throw new Error("OPERATOR_BALANCE_TOO_LOW_FOR_REMAINING_PROVISIONING");
+  const availableHbar = (account.balance.balance / 100_000_000).toFixed(8);
+  const requiredHbar = ((plannedInitialBalance + 150_000_000) / 100_000_000).toFixed(2);
+  throw new Error(
+    `OPERATOR_BALANCE_TOO_LOW_FOR_REMAINING_PROVISIONING: available=${availableHbar}_HBAR required_at_least=${requiredHbar}_HBAR`
+  );
 }
 const key = await operatorKey(account);
 const treasuryKey = state.HEDERA_TREASURY_KEY
@@ -222,6 +246,9 @@ const treasuryKey = state.HEDERA_TREASURY_KEY
   : PrivateKey.generateED25519();
 const poolKey = state.HEDERA_POOL_KEY
   ? PrivateKey.fromString(state.HEDERA_POOL_KEY)
+  : PrivateKey.generateED25519();
+const escrowKey = state.HEDERA_ESCROW_KEY
+  ? PrivateKey.fromString(state.HEDERA_ESCROW_KEY)
   : PrivateKey.generateED25519();
 const supplyKey = state.HEDERA_SUPPLY_KEY
   ? PrivateKey.fromString(state.HEDERA_SUPPLY_KEY)
@@ -246,6 +273,9 @@ Object.assign(state, {
   HEDERA_TOPIC_ID: state.HEDERA_TOPIC_ID ?? "",
   HEDERA_TOKEN_ID: state.HEDERA_TOKEN_ID ?? "",
   HEDERA_STABLE_TOKEN_ID: state.HEDERA_STABLE_TOKEN_ID ?? "",
+  HEDERA_COLLATERAL_TOKEN_ID: state.HEDERA_COLLATERAL_TOKEN_ID ?? "",
+  HEDERA_ESCROW_ID: state.HEDERA_ESCROW_ID ?? "",
+  HEDERA_ESCROW_KEY: escrowKey.toStringDer(),
   HEDERA_RECIPIENT_ID: state.HEDERA_RECIPIENT_ID ?? operatorIdText,
   HEDERA_MIRROR_URL: mirrorUrl,
   POLICY_FIXED_CAP_MINOR: state.POLICY_FIXED_CAP_MINOR ?? "1000",
@@ -272,6 +302,16 @@ try {
       poolKey,
       new Hbar(1),
       "unlockd.bond Testnet pool"
+    );
+    persistEnv();
+  }
+  if (!state.HEDERA_ESCROW_ID) {
+    process.stdout.write("Creating 1 HBAR synthetic collateral escrow account...\n");
+    state.HEDERA_ESCROW_ID = await createAccount(
+      client,
+      escrowKey,
+      new Hbar(1),
+      "unlockd.bond Testnet synthetic collateral escrow"
     );
     persistEnv();
   }
@@ -342,6 +382,28 @@ try {
       throw new Error("HTS_TOKEN_CREATE_FAILED");
     }
     state.HEDERA_TOKEN_ID = receipt.tokenId.toString();
+    persistEnv();
+  }
+  if (!state.HEDERA_COLLATERAL_TOKEN_ID) {
+    process.stdout.write("Creating Demo Equity Collateral NFT collection...\n");
+    const frozen = new TokenCreateTransaction()
+      .setTokenName("unlockd.bond Demo Equity Collateral")
+      .setTokenSymbol("UBEQ")
+      .setTokenType(TokenType.NonFungibleUnique)
+      .setSupplyType(TokenSupplyType.Infinite)
+      .setTreasuryAccountId(AccountId.fromString(state.HEDERA_TREASURY_ID))
+      .setSupplyKey(supplyKey.publicKey)
+      .setTokenMemo("Synthetic demo collateral; no real shares or value")
+      .setMaxTransactionFee(new Hbar(16))
+      .freezeWith(client);
+    const treasurySigned = await frozen.sign(treasuryKey);
+    const supplySigned = await treasurySigned.sign(supplyKey);
+    const transaction = await supplySigned.execute(client);
+    const receipt = await transaction.getReceipt(client);
+    if (receipt.status.toString() !== "SUCCESS" || !receipt.tokenId) {
+      throw new Error("HTS_COLLATERAL_TOKEN_CREATE_FAILED");
+    }
+    state.HEDERA_COLLATERAL_TOKEN_ID = receipt.tokenId.toString();
     persistEnv();
   }
   if (!state.HEDERA_STABLE_TOKEN_ID) {
@@ -433,6 +495,44 @@ try {
     if (receipt.status.toString() !== "SUCCESS") {
       throw new Error("RECIPIENT_STABLE_ASSOCIATION_FAILED");
     }
+  }
+  const collateralAssociations = [
+    {
+      accountId: state.HEDERA_ESCROW_ID,
+      accountKey: escrowKey,
+      failure: "ESCROW_COLLATERAL_ASSOCIATION_FAILED"
+    },
+    {
+      accountId: state.HEDERA_POOL_ID,
+      accountKey: poolKey,
+      failure: "POOL_COLLATERAL_ASSOCIATION_FAILED"
+    },
+    {
+      accountId: recipientId,
+      accountKey: recipientId === operatorIdText ? key : null,
+      failure: "RECIPIENT_COLLATERAL_ASSOCIATION_FAILED"
+    }
+  ];
+  for (const association of collateralAssociations) {
+    const relationship = (await fetch(
+      `${mirrorUrl}/api/v1/accounts/${association.accountId}/tokens?token.id=${state.HEDERA_COLLATERAL_TOKEN_ID}`
+    ).then((response) => response.json())) as { tokens?: Array<{ token_id: string }> };
+    if (relationship.tokens?.some((token) => token.token_id === state.HEDERA_COLLATERAL_TOKEN_ID)) {
+      continue;
+    }
+    if (!association.accountKey) {
+      throw new Error("RECIPIENT_COLLATERAL_ASSOCIATION_MUST_BE_COMPLETED_BY_RECIPIENT");
+    }
+    process.stdout.write(`Associating ${association.accountId} with Demo Equity Collateral...\n`);
+    const transaction = await (
+      await new TokenAssociateTransaction()
+        .setAccountId(AccountId.fromString(association.accountId))
+        .setTokenIds([state.HEDERA_COLLATERAL_TOKEN_ID])
+        .freezeWith(client)
+        .sign(association.accountKey)
+    ).execute(client);
+    const receipt = await transaction.getReceipt(client);
+    if (receipt.status.toString() !== "SUCCESS") throw new Error(association.failure);
   }
   writeEvidence();
   process.stdout.write(

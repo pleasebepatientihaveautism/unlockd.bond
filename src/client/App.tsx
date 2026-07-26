@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  AlertTriangle,
   Bell,
+  BriefcaseBusiness,
   Building2,
   Check,
   ChevronDown,
@@ -26,9 +28,13 @@ import type {
   AssetSymbol,
   FundingResult,
   FundingResultV2,
-  PrivateCompanyListing
+  FundingResultV3,
+  FundingTransaction,
+  PrivateCompanyListing,
+  RepaymentResult
 } from "../domain/schemas";
-import { evaluateAdvance, fundAdvance, getPrivateCompanies, repayAdvance } from "./api";
+import { evaluateAdvance, fundAdvance, getAdvance, getPrivateCompanies } from "./api";
+import { PositionDetailPage, PositionsPage, RepaymentPage } from "./Positions";
 
 type FormState = {
   asset: AssetSymbol;
@@ -58,11 +64,58 @@ const initialForm: FormState = {
   term: "180"
 };
 
-function isFundingResultV2(funding: FundingResult): funding is FundingResultV2 {
-  return "version" in funding && funding.version === 2;
+function isFundingResultModern(
+  funding: FundingResult
+): funding is FundingResultV2 | FundingResultV3 {
+  return "version" in funding && (funding.version === 2 || funding.version === 3);
 }
 
-type WorkflowScreen = "equity" | "advance" | "review" | "receipt";
+function repaymentTransactions(repayment: RepaymentResult): Array<[string, FundingTransaction]> {
+  const transactions: Array<[string, FundingTransaction | undefined]> = [
+    ["Repayment authorization HCS", repayment.transactions.authorization],
+    ["Atomic repayment settlement", repayment.transactions.settlement],
+    ["Advance Note burn", repayment.transactions.noteBurn],
+    [
+      repayment.version === 2 ? "Repayment completion HCS" : "Repaid HCS",
+      repayment.version === 2
+        ? repayment.transactions.completionEvent
+        : repayment.transactions.repaidEvent
+    ]
+  ];
+  return transactions.filter(
+    (entry): entry is [string, FundingTransaction] => entry[1] !== undefined
+  );
+}
+
+type WorkflowScreen =
+  | "home"
+  | "equity"
+  | "advance"
+  | "review"
+  | "receipt"
+  | "positions"
+  | "position"
+  | "repay";
+
+function initialRoute(): { screen: WorkflowScreen; positionId: string | null } {
+  const hash = window.location.hash;
+  if (hash.startsWith("#position/")) {
+    return { screen: "position", positionId: decodeURIComponent(hash.slice("#position/".length)) };
+  }
+  if (hash.startsWith("#repay/")) {
+    return { screen: "repay", positionId: decodeURIComponent(hash.slice("#repay/".length)) };
+  }
+  if (hash.startsWith("#receipt/")) {
+    return { screen: "receipt", positionId: decodeURIComponent(hash.slice("#receipt/".length)) };
+  }
+  if (hash === "#home") return { screen: "home", positionId: null };
+  if (hash === "#equity") return { screen: "equity", positionId: null };
+  if (hash === "#positions") return { screen: "positions", positionId: null };
+  if (hash === "#advance") return { screen: "advance", positionId: null };
+  if (hash === "#review") return { screen: "review", positionId: null };
+  if (hash === "#receipt") return { screen: "receipt", positionId: null };
+  return { screen: "home", positionId: null };
+}
 
 const navItems: Array<{
   label: string;
@@ -70,8 +123,9 @@ const navItems: Array<{
   screen: WorkflowScreen;
   icon: LucideIcon;
 }> = [
-  { label: "Equity profile", href: "#equity", screen: "equity", icon: WalletCards },
+  { label: "Add equity", href: "#equity", screen: "equity", icon: WalletCards },
   { label: "Financing", href: "#advance", screen: "advance", icon: CircleDollarSign },
+  { label: "Positions", href: "#positions", screen: "positions", icon: BriefcaseBusiness },
   { label: "Documents", href: "#receipt", screen: "receipt", icon: ReceiptText }
 ];
 
@@ -87,7 +141,12 @@ function Navigation({
       <nav className="primary-nav" aria-label="Main navigation">
         {navItems.map(({ label, href, screen, icon: NavIcon }) => (
           <a
-            className={activeScreen === screen ? "is-current" : ""}
+            className={
+              activeScreen === screen ||
+              (screen === "positions" && ["position", "repay"].includes(activeScreen))
+                ? "is-current"
+                : ""
+            }
             href={href}
             key={label}
             onClick={(event) => {
@@ -265,8 +324,10 @@ function buildInput(form: FormState): AdvanceRequest {
 }
 
 export function App() {
+  const initial = useMemo(initialRoute, []);
   const [form, setForm] = useState(initialForm);
-  const [activeScreen, setActiveScreen] = useState<WorkflowScreen>("equity");
+  const [activeScreen, setActiveScreen] = useState<WorkflowScreen>(initial.screen);
+  const [selectedPositionId, setSelectedPositionId] = useState<string | null>(initial.positionId);
   const [profileStep, setProfileStep] = useState<1 | 2 | 3 | 4>(1);
   const [profileComplete, setProfileComplete] = useState(false);
   const [vestingPreset, setVestingPreset] = useState<
@@ -276,7 +337,7 @@ export function App() {
   const [vestingFrequency, setVestingFrequency] = useState("Quarterly");
   const [advance, setAdvance] = useState<CustomerAdvance | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"evaluate" | "fund" | "repay" | null>(null);
+  const [busy, setBusy] = useState<"evaluate" | "fund" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [privateCompanies, setPrivateCompanies] = useState<PrivateCompanyListing[]>([]);
@@ -317,6 +378,28 @@ export function App() {
   }, [advance]);
 
   const selectedAdvanceIsPrivate = advance?.market.evidenceType === "PRIVATE_VALUATION";
+
+  useEffect(() => {
+    if (initial.screen !== "receipt" || !initial.positionId) return;
+    let cancelled = false;
+    setProfileComplete(true);
+    setBusy("fund");
+    void getAdvance(initial.positionId)
+      .then((result) => {
+        if (!cancelled) setAdvance(result);
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : "RECEIPT_LOAD_FAILED");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initial]);
 
   useEffect(() => {
     let cancelled = false;
@@ -388,23 +471,46 @@ export function App() {
     setProfileComplete(false);
     setProfileStep(1);
     setActiveScreen("equity");
+    window.history.replaceState(null, "", "#equity");
     alignProfile();
   }
 
   function showScreen(screen: WorkflowScreen) {
-    if (screen !== "equity" && !profileComplete) {
+    const financingScreen = ["advance", "review"].includes(screen);
+    if (financingScreen && screen !== "equity" && !profileComplete) {
       setActiveScreen("equity");
+      window.history.replaceState(null, "", "#equity");
       return;
     }
-    if ((screen === "review" || screen === "receipt") && !advance) {
+    if (screen === "review" && !advance) {
       setActiveScreen("advance");
-      return;
-    }
-    if (screen === "receipt" && !funded) {
-      setActiveScreen(advance ? "review" : "advance");
+      window.history.replaceState(null, "", "#advance");
       return;
     }
     setActiveScreen(screen);
+    if (["home", "equity", "advance", "review", "receipt", "positions"].includes(screen)) {
+      window.history.replaceState(null, "", `#${screen}`);
+    }
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  }
+
+  function openPosition(advanceId: string) {
+    setSelectedPositionId(advanceId);
+    setActiveScreen("position");
+    window.history.replaceState(null, "", `#position/${encodeURIComponent(advanceId)}`);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  }
+
+  function openRepayment(advanceId: string) {
+    setSelectedPositionId(advanceId);
+    setActiveScreen("repay");
+    window.history.replaceState(null, "", `#repay/${encodeURIComponent(advanceId)}`);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  }
+
+  function openPositions() {
+    setActiveScreen("positions");
+    window.history.replaceState(null, "", "#positions");
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
   }
 
@@ -451,25 +557,11 @@ export function App() {
     }
   }
 
-  async function repay() {
-    if (!advance || !token || advance.state !== "FUNDED") return;
-    setBusy("repay");
-    setError(null);
-    try {
-      const repaymentId = `ub_rp_${crypto.randomUUID().replaceAll("-", "")}`;
-      const result = await repayAdvance(advance.advanceId, repaymentId, token);
-      setAdvance(result.advance);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "REPAYMENT_FAILED");
-    } finally {
-      setBusy(null);
-    }
-  }
-
   const fundingSimulated = advance?.funding?.simulated ?? false;
-  const fundingV2 = advance?.funding && isFundingResultV2(advance.funding) ? advance.funding : null;
+  const fundingV2 =
+    advance?.funding && isFundingResultModern(advance.funding) ? advance.funding : null;
   const legacyFunding =
-    advance?.funding && !isFundingResultV2(advance.funding) ? advance.funding : null;
+    advance?.funding && !isFundingResultModern(advance.funding) ? advance.funding : null;
   const fundingConsensusSuccess = fundingV2
     ? Object.values(fundingV2.transactions).every(
         (transaction) => transaction.consensusStatus === "SUCCESS"
@@ -485,7 +577,6 @@ export function App() {
   const repaid = advance !== null && advance.state === "REPAID" && advance.repayment !== null;
   const repaymentPending = advance?.state === "REPAYMENT_PENDING";
   const authorized = advance?.state === "AUTHORIZED";
-  const verifiedCount = funded ? 5 : authorized ? 4 : advance ? 3 : profileComplete ? 2 : 0;
   const journeyStage =
     activeScreen === "receipt"
       ? 4
@@ -494,6 +585,7 @@ export function App() {
         : activeScreen === "advance"
           ? 2
           : 1;
+  const positionRoute = ["positions", "position", "repay"].includes(activeScreen);
   const selectedCompanyName = selectedCompany?.companyName ?? "private company";
   const grantLabel = form.grantType === "OPTION" ? "stock options" : "shares";
   const termLabel = form.term === "3650" ? "Until a liquidity event" : `${Number(form.term)} days`;
@@ -501,18 +593,23 @@ export function App() {
   return (
     <div className="product-shell">
       <aside className="sidebar" aria-label="Main navigation">
-        <a className="brand" href="#equity" aria-label="unlockd.bond equity workspace">
+        <button
+          className="brand"
+          aria-label="unlockd.bond equity workspace"
+          onClick={() => showScreen("home")}
+          type="button"
+        >
           unlockd.bond
-        </a>
+        </button>
         <Navigation activeScreen={activeScreen} onNavigate={showScreen} />
       </aside>
 
       <div className="workspace">
         <header className="topbar">
           <div className="mobile-brand-row">
-            <a className="brand mobile-brand" href="#equity">
+            <button className="brand mobile-brand" onClick={() => showScreen("home")} type="button">
               unlockd.bond
-            </a>
+            </button>
             <button
               aria-expanded={menuOpen}
               aria-label="Open menu"
@@ -524,9 +621,21 @@ export function App() {
             </button>
           </div>
           <div className="breadcrumb">
-            <span>Equity</span>
+            <span>{positionRoute ? "Portfolio" : "Equity"}</span>
             <span className="breadcrumb-separator">/</span>
-            <strong>Equity financing</strong>
+            <strong>
+              {activeScreen === "repay"
+                ? "Close debt"
+                : activeScreen === "position"
+                  ? "Position details"
+                  : activeScreen === "equity"
+                    ? "Add your equity"
+                    : activeScreen === "home"
+                      ? "Overview"
+                      : positionRoute
+                        ? "Positions"
+                        : "Equity financing"}
+            </strong>
           </div>
           <button aria-label="Notifications" className="icon-button" type="button">
             <Bell aria-hidden="true" size={21} strokeWidth={1.6} />
@@ -545,7 +654,10 @@ export function App() {
               <div className="drawer-heading">
                 <button
                   className="brand drawer-brand"
-                  onClick={() => setMenuOpen(false)}
+                  onClick={() => {
+                    showScreen("home");
+                    setMenuOpen(false);
+                  }}
                   type="button"
                 >
                   unlockd.bond
@@ -570,45 +682,83 @@ export function App() {
           </div>
         ) : null}
 
-        <main className="content" id="overview">
-          <section className="assistant-hero" aria-labelledby="workspace-title">
-            <p className="eyebrow">Private-company equity financing</p>
-            <h1 id="workspace-title">Make your equity work for your financial goals</h1>
-            <p>
-              Explore financing for stock-option exercise costs or liquidity needs without selling
-              your private-company equity today.
-            </p>
-            <nav className="quick-actions" aria-label="Quick actions">
-              <button onClick={() => showScreen("equity")} type="button">
-                <WalletCards aria-hidden="true" size={18} />
-                Add your equity
-              </button>
-              <button onClick={() => showScreen("advance")} type="button">
-                <CircleDollarSign aria-hidden="true" size={18} />
-                Explore financing
-              </button>
-              <button onClick={() => showScreen("receipt")} type="button">
-                <ReceiptText aria-hidden="true" size={18} />
-                View documents
-              </button>
-            </nav>
-          </section>
+        <main
+          className={`content ${positionRoute ? "positions-content" : ""} ${
+            activeScreen === "equity" ? "equity-content" : ""
+          }`}
+          id="overview"
+        >
+          {activeScreen === "home" ? (
+            <section className="assistant-hero" aria-labelledby="workspace-title">
+              <p className="eyebrow">Private-company equity financing</p>
+              <h1 id="workspace-title">Make your equity work for your financial goals</h1>
+              <p>
+                Explore financing for stock-option exercise costs or liquidity needs without selling
+                your private-company equity today.
+              </p>
+              <nav className="quick-actions" aria-label="Quick actions">
+                <button onClick={() => showScreen("equity")} type="button">
+                  <WalletCards aria-hidden="true" size={18} />
+                  Add your equity
+                </button>
+                <button onClick={() => showScreen("advance")} type="button">
+                  <CircleDollarSign aria-hidden="true" size={18} />
+                  Explore financing
+                </button>
+                <button onClick={() => showScreen("receipt")} type="button">
+                  <ReceiptText aria-hidden="true" size={18} />
+                  View documents
+                </button>
+              </nav>
+            </section>
+          ) : null}
 
-          <JourneySteps stage={journeyStage} />
+          {["advance", "review", "receipt"].includes(activeScreen) ? (
+            <JourneySteps stage={journeyStage} />
+          ) : null}
+
+          {activeScreen === "positions" ? (
+            <PositionsPage onOpen={openPosition} onRepay={openRepayment} />
+          ) : null}
+          {activeScreen === "position" && selectedPositionId ? (
+            <PositionDetailPage
+              advanceId={selectedPositionId}
+              onBack={openPositions}
+              onRepay={() => openRepayment(selectedPositionId)}
+            />
+          ) : null}
+          {activeScreen === "repay" && selectedPositionId ? (
+            <RepaymentPage
+              advanceId={selectedPositionId}
+              onBack={() => openPosition(selectedPositionId)}
+              onUpdated={(position) => {
+                if (advance?.advanceId === position.advance.advanceId) {
+                  setAdvance(position.advance);
+                }
+              }}
+            />
+          ) : null}
 
           {activeScreen === "equity" ? (
-            <section className="dashboard-section" id="equity">
-              <div className="section-heading">
+            <section className="equity-page" id="equity">
+              <header className="equity-page-heading">
                 <div>
-                  <p className="section-kicker">Your equity</p>
-                  <h2>Tell us about your private-company equity</h2>
+                  <h1>Add your equity</h1>
+                  <p>
+                    Build a private-company equity profile before requesting Demo USDC financing.
+                  </p>
                 </div>
+                <span>Synthetic demo profile</span>
+              </header>
+
+              <div className="section-heading">
+                <h2>Private-company equity profile</h2>
                 {profileComplete ? (
                   <button className="section-link" onClick={editProfile} type="button">
                     Edit profile
                   </button>
                 ) : (
-                  <span className="section-meta">Synthetic demo profile</span>
+                  <span className="section-meta">Four steps</span>
                 )}
               </div>
 
@@ -1052,26 +1202,6 @@ export function App() {
                     {selectedCompanyName} · private-market estimate
                   </div>
                 </article>
-
-                <article className="metric-card readiness-card">
-                  <span className="card-label">Funding readiness</span>
-                  <strong>{verifiedCount} of 5</strong>
-                  <div
-                    aria-label={`${verifiedCount} of 5 checks complete`}
-                    aria-valuemax={5}
-                    aria-valuemin={0}
-                    aria-valuenow={verifiedCount}
-                    className="readiness-track"
-                    role="progressbar"
-                  >
-                    {["equity", "kyc", "market", "risk", "funding"].map((key, index) => (
-                      <span className={index < verifiedCount ? "complete" : ""} key={key} />
-                    ))}
-                  </div>
-                  <button onClick={() => showScreen("advance")} type="button">
-                    Explore financing
-                  </button>
-                </article>
               </div>
             </section>
           ) : null}
@@ -1425,17 +1555,15 @@ export function App() {
                         repaymentPending ||
                         advance.state === "REPAYMENT_REVIEW_REQUIRED"
                       }
-                      onClick={repay}
+                      onClick={() => openRepayment(advance.advanceId)}
                       type="button"
                     >
                       <CircleDollarSign aria-hidden="true" size={17} />
-                      {busy === "repay"
-                        ? "Repaying on Hedera…"
-                        : repaymentPending
-                          ? "Repayment pending…"
-                          : advance.state === "REPAYMENT_REVIEW_REQUIRED"
-                            ? "Manual review required"
-                            : "Repay full principal"}
+                      {repaymentPending
+                        ? "Repayment pending…"
+                        : advance.state === "REPAYMENT_REVIEW_REQUIRED"
+                          ? "Manual review required"
+                          : "Close debt"}
                     </button>
                     <p>
                       Returns Demo USDC to the treasury and permanently retires the Advance Note.
@@ -1468,7 +1596,11 @@ export function App() {
                   <p className="section-kicker">Audit record</p>
                   <h2>Proof receipt</h2>
                 </div>
-                <span className={`summary-status ${funded ? "is-ready" : ""}`}>
+                <span
+                  className={`summary-status ${
+                    funded ? (fundingSimulated ? "is-simulated" : "is-ready") : ""
+                  }`}
+                >
                   {funded
                     ? fundingSimulated
                       ? "Simulated receipt"
@@ -1478,169 +1610,50 @@ export function App() {
               </div>
 
               {funded && advance.funding ? (
-                <div className="receipt-layout">
-                  {fundingV2 ? (
-                    <dl className="receipt-data">
+                <>
+                  {fundingSimulated ? (
+                    <div className="receipt-mode-warning" role="status">
+                      <AlertTriangle aria-hidden="true" size={20} />
                       <div>
-                        <dt>Payout</dt>
-                        <dd>
-                          {(fundingV2.asset.amountMinor / 100).toFixed(2)} USDC
-                          <span className="demo-token-label">Demo Testnet Token</span>
-                        </dd>
+                        <strong>No Hedera transaction was submitted</strong>
+                        <p>
+                          This receipt was generated in simulation mode. HashScan and Mirror Node
+                          links appear only after every live Testnet transaction reaches consensus.
+                        </p>
                       </div>
-                      {(
-                        [
-                          ["Authorization HCS", fundingV2.transactions.authorization],
-                          ["Advance Note mint", fundingV2.transactions.noteMint],
-                          ["Atomic settlement", fundingV2.transactions.settlement],
-                          ["Funded HCS", fundingV2.transactions.fundedEvent]
-                        ] as const
-                      ).map(([label, transaction]) => (
-                        <div key={label}>
-                          <dt>{label}</dt>
-                          <dd>
-                            {fundingV2.simulated ? (
-                              transaction.transactionId
-                            ) : (
-                              <a href={transaction.hashscanUrl} rel="noreferrer" target="_blank">
-                                {transaction.transactionId}
-                                <ExternalLink aria-hidden="true" size={13} />
-                              </a>
-                            )}
-                          </dd>
-                        </div>
-                      ))}
-                      <div>
-                        <dt>USDC DEMO token</dt>
-                        <dd>
-                          {fundingV2.simulated ? (
-                            fundingV2.asset.tokenId
-                          ) : (
-                            <a href={fundingV2.asset.hashscanUrl} rel="noreferrer" target="_blank">
-                              {fundingV2.asset.tokenId}
-                              <ExternalLink aria-hidden="true" size={13} />
-                            </a>
-                          )}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>NFT receipt</dt>
-                        <dd>
-                          {fundingV2.simulated ? (
-                            `${fundingV2.note.tokenId}/${fundingV2.note.serial}`
-                          ) : (
-                            <a href={fundingV2.note.hashscanUrl} rel="noreferrer" target="_blank">
-                              {fundingV2.note.tokenId}/{fundingV2.note.serial}
-                              <ExternalLink aria-hidden="true" size={13} />
-                            </a>
-                          )}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>HCS topic</dt>
-                        <dd>
-                          {fundingV2.simulated ? (
-                            fundingV2.topic.topicId
-                          ) : (
-                            <a href={fundingV2.topic.hashscanUrl} rel="noreferrer" target="_blank">
-                              {fundingV2.topic.topicId}
-                              <ExternalLink aria-hidden="true" size={13} />
-                            </a>
-                          )}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Advance ID</dt>
-                        <dd>{advance.advanceId}</dd>
-                      </div>
-                    </dl>
-                  ) : legacyFunding ? (
-                    <dl className="receipt-data">
-                      <div>
-                        <dt>Payment transaction</dt>
-                        <dd>
-                          <a
-                            href={legacyFunding.hashscanTransactionUrl}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            {legacyFunding.paymentTxId}
-                            <ExternalLink aria-hidden="true" size={13} />
-                          </a>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>NFT receipt</dt>
-                        <dd>
-                          <a href={legacyFunding.hashscanTokenUrl} rel="noreferrer" target="_blank">
-                            {legacyFunding.noteTokenId}/{legacyFunding.noteSerial}
-                            <ExternalLink aria-hidden="true" size={13} />
-                          </a>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>HCS topic</dt>
-                        <dd>
-                          <a href={legacyFunding.hashscanTopicUrl} rel="noreferrer" target="_blank">
-                            {legacyFunding.hcsTopicId}
-                            <ExternalLink aria-hidden="true" size={13} />
-                          </a>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Advance ID</dt>
-                        <dd>{advance.advanceId}</dd>
-                      </div>
-                    </dl>
-                  ) : null}
-                  <div className="receipt-proof">
-                    <FileCheck2 aria-hidden="true" size={28} />
-                    <div>
-                      <strong>A transaction ID alone is not settlement proof.</strong>
-                      <p>
-                        The receipt binds the payment, Advance Note, HCS record, and public
-                        commitments.
-                      </p>
                     </div>
-                  </div>
-                  {advance.repayment ? (
-                    <div className="repayment-receipt">
-                      <div className="panel-heading receipt-title">
-                        <div>
-                          <p className="section-kicker">Repayment audit record</p>
-                          <h3>Repaid receipt</h3>
-                        </div>
-                        <span className="summary-status is-ready">
-                          {advance.repayment.simulated ? "Simulated receipt" : "Consensus SUCCESS"}
-                        </span>
-                      </div>
+                  ) : null}
+                  <div className="receipt-layout">
+                    {fundingV2 ? (
                       <dl className="receipt-data">
                         <div>
-                          <dt>Principal returned</dt>
+                          <dt>Payout</dt>
                           <dd>
-                            {(advance.repayment.asset.amountMinor / 100).toFixed(2)} USDC
+                            {(fundingV2.asset.amountMinor / 100).toFixed(2)} USDC
                             <span className="demo-token-label">Demo Testnet Token</span>
                           </dd>
                         </div>
                         {(
                           [
-                            [
-                              "Repayment authorization HCS",
-                              advance.repayment.transactions.authorization
-                            ],
-                            [
-                              "Atomic repayment settlement",
-                              advance.repayment.transactions.settlement
-                            ],
-                            ["Advance Note burn", advance.repayment.transactions.noteBurn],
-                            ["Repaid HCS", advance.repayment.transactions.repaidEvent]
+                            ["Authorization HCS", fundingV2.transactions.authorization],
+                            ["Advance Note mint", fundingV2.transactions.noteMint],
+                            ...("collateral" in fundingV2
+                              ? [
+                                  [
+                                    "Collateral mint",
+                                    fundingV2.transactions.collateralMint
+                                  ] as const
+                                ]
+                              : []),
+                            ["Atomic settlement", fundingV2.transactions.settlement],
+                            ["Funded HCS", fundingV2.transactions.fundedEvent]
                           ] as const
                         ).map(([label, transaction]) => (
                           <div key={label}>
                             <dt>{label}</dt>
                             <dd>
-                              {advance.repayment?.simulated ? (
-                                transaction.transactionId
+                              {fundingV2.simulated ? (
+                                <span className="simulated-evidence">Not submitted to Hedera</span>
                               ) : (
                                 <a href={transaction.hashscanUrl} rel="noreferrer" target="_blank">
                                   {transaction.transactionId}
@@ -1651,27 +1664,199 @@ export function App() {
                           </div>
                         ))}
                         <div>
-                          <dt>Advance Note</dt>
+                          <dt>USDC DEMO token</dt>
+                          <dd>
+                            {fundingV2.simulated ? (
+                              <span className="simulated-evidence">Demo-only token</span>
+                            ) : (
+                              <a
+                                href={fundingV2.asset.hashscanUrl}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                {fundingV2.asset.tokenId}
+                                <ExternalLink aria-hidden="true" size={13} />
+                              </a>
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>NFT receipt</dt>
+                          <dd>
+                            {fundingV2.simulated ? (
+                              <span className="simulated-evidence">Demo-only NFT</span>
+                            ) : (
+                              <a href={fundingV2.note.hashscanUrl} rel="noreferrer" target="_blank">
+                                {fundingV2.note.tokenId}/{fundingV2.note.serial}
+                                <ExternalLink aria-hidden="true" size={13} />
+                              </a>
+                            )}
+                          </dd>
+                        </div>
+                        {"collateral" in fundingV2 ? (
+                          <div>
+                            <dt>Synthetic collateral NFT</dt>
+                            <dd>
+                              {fundingV2.simulated ? (
+                                <span className="simulated-evidence">Demo-only collateral NFT</span>
+                              ) : (
+                                <a
+                                  href={fundingV2.collateral.hashscanUrl}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  {fundingV2.collateral.tokenId}/{fundingV2.collateral.serial}
+                                  <ExternalLink aria-hidden="true" size={13} />
+                                </a>
+                              )}
+                              <span className="demo-token-label">
+                                Synthetic demo collateral — no real shares or value
+                              </span>
+                            </dd>
+                          </div>
+                        ) : null}
+                        <div>
+                          <dt>HCS topic</dt>
+                          <dd>
+                            {fundingV2.simulated ? (
+                              <span className="simulated-evidence">Not submitted to HCS</span>
+                            ) : (
+                              <a
+                                href={fundingV2.topic.hashscanUrl}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                {fundingV2.topic.topicId}
+                                <ExternalLink aria-hidden="true" size={13} />
+                              </a>
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Advance ID</dt>
+                          <dd>{advance.advanceId}</dd>
+                        </div>
+                      </dl>
+                    ) : legacyFunding ? (
+                      <dl className="receipt-data">
+                        <div>
+                          <dt>Payment transaction</dt>
                           <dd>
                             <a
-                              href={advance.repayment.note.hashscanUrl}
+                              href={legacyFunding.hashscanTransactionUrl}
                               rel="noreferrer"
                               target="_blank"
                             >
-                              {advance.repayment.note.tokenId}/{advance.repayment.note.serial} ·
-                              retired
+                              {legacyFunding.paymentTxId}
                               <ExternalLink aria-hidden="true" size={13} />
                             </a>
                           </dd>
                         </div>
                         <div>
-                          <dt>Repayment ID</dt>
-                          <dd>{advance.repayment.repaymentId}</dd>
+                          <dt>NFT receipt</dt>
+                          <dd>
+                            <a
+                              href={legacyFunding.hashscanTokenUrl}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              {legacyFunding.noteTokenId}/{legacyFunding.noteSerial}
+                              <ExternalLink aria-hidden="true" size={13} />
+                            </a>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>HCS topic</dt>
+                          <dd>
+                            <a
+                              href={legacyFunding.hashscanTopicUrl}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              {legacyFunding.hcsTopicId}
+                              <ExternalLink aria-hidden="true" size={13} />
+                            </a>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Advance ID</dt>
+                          <dd>{advance.advanceId}</dd>
                         </div>
                       </dl>
+                    ) : null}
+                    <div className="receipt-proof">
+                      <FileCheck2 aria-hidden="true" size={28} />
+                      <div>
+                        <strong>A transaction ID alone is not settlement proof.</strong>
+                        <p>
+                          The receipt binds the payment, Advance Note, HCS record, and public
+                          commitments.
+                        </p>
+                      </div>
                     </div>
-                  ) : null}
-                </div>
+                    {advance.repayment ? (
+                      <div className="repayment-receipt">
+                        <div className="panel-heading receipt-title">
+                          <div>
+                            <p className="section-kicker">Repayment audit record</p>
+                            <h3>Repaid receipt</h3>
+                          </div>
+                          <span className="summary-status is-ready">
+                            {advance.repayment.simulated
+                              ? "Simulated receipt"
+                              : "Consensus SUCCESS"}
+                          </span>
+                        </div>
+                        <dl className="receipt-data">
+                          <div>
+                            <dt>Principal returned</dt>
+                            <dd>
+                              {(advance.repayment.asset.amountMinor / 100).toFixed(2)} USDC
+                              <span className="demo-token-label">Demo Testnet Token</span>
+                            </dd>
+                          </div>
+                          {repaymentTransactions(advance.repayment).map(([label, transaction]) => (
+                            <div key={label}>
+                              <dt>{label}</dt>
+                              <dd>
+                                {advance.repayment?.simulated ? (
+                                  transaction.transactionId
+                                ) : (
+                                  <a
+                                    href={transaction.hashscanUrl}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                  >
+                                    {transaction.transactionId}
+                                    <ExternalLink aria-hidden="true" size={13} />
+                                  </a>
+                                )}
+                              </dd>
+                            </div>
+                          ))}
+                          <div>
+                            <dt>Advance Note</dt>
+                            <dd>
+                              <a
+                                href={advance.repayment.note.hashscanUrl}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                {advance.repayment.note.tokenId}/{advance.repayment.note.serial} ·
+                                retired
+                                <ExternalLink aria-hidden="true" size={13} />
+                              </a>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Repayment ID</dt>
+                            <dd>{advance.repayment.repaymentId}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    ) : null}
+                  </div>
+                </>
               ) : (
                 <div className="empty-receipt">
                   <ReceiptText aria-hidden="true" size={26} />

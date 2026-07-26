@@ -1,4 +1,6 @@
 import type { Pool, PoolClient } from "pg";
+import type { ValuationObservation } from "../domain/positions.js";
+import { positionMaturity, positionTimestampToIso } from "../domain/positions.js";
 import type { AdvanceRecord } from "../domain/public.js";
 import { type AdvanceStore, StoreError } from "./store.js";
 
@@ -13,8 +15,8 @@ export class PostgresAdvanceStore implements AdvanceStore {
     const result = await this.pool.query<AdvanceRow>(
       `INSERT INTO advances (
          advance_id, request_id, state, mode, recipient_account_id, expires_at,
-         confirmation_token_hash, record
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+         confirmation_token_hash, owner_session_hash, record
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
        ON CONFLICT (request_id) DO NOTHING
        RETURNING record`,
       [
@@ -25,6 +27,7 @@ export class PostgresAdvanceStore implements AdvanceStore {
         record.recipientAccountId,
         record.expiresAt,
         record.confirmationTokenHash,
+        record.ownerSessionHash ?? null,
         JSON.stringify(record)
       ]
     );
@@ -43,6 +46,16 @@ export class PostgresAdvanceStore implements AdvanceStore {
       [advanceId]
     );
     return result.rows[0]?.record ?? null;
+  }
+
+  async listByOwner(ownerSessionHash: string): Promise<AdvanceRecord[]> {
+    const result = await this.pool.query<AdvanceRow>(
+      `SELECT record FROM advances
+       WHERE owner_session_hash = $1
+       ORDER BY created_at DESC`,
+      [ownerSessionHash]
+    );
+    return result.rows.map((row) => row.record);
   }
 
   async beginFunding(
@@ -97,13 +110,24 @@ export class PostgresAdvanceStore implements AdvanceStore {
     advanceId: string,
     funding: NonNullable<AdvanceRecord["funding"]>
   ): Promise<AdvanceRecord> {
-    return this.update(advanceId, (record) => ({
-      ...record,
-      state: "FUNDED",
-      funding,
-      fundingProgress: null,
-      failureCode: null
-    }));
+    return this.update(advanceId, (record) => {
+      const fundedAt = positionTimestampToIso(
+        "version" in funding
+          ? funding.transactions.settlement.consensusTimestamp
+          : funding.consensusTimestamp
+      );
+      return {
+        ...record,
+        state: "FUNDED",
+        funding,
+        fundedAt,
+        maturityAt: positionMaturity(fundedAt, record.termDays),
+        remainingPrincipalMinor: record.authorization.amountMinor,
+        collateral: "version" in funding && funding.version === 3 ? funding.collateral : null,
+        fundingProgress: null,
+        failureCode: null
+      };
+    });
   }
 
   async recordFundingProgress(
@@ -183,6 +207,60 @@ export class PostgresAdvanceStore implements AdvanceStore {
     }
   }
 
+  async beginPositionRepayment(
+    advanceId: string,
+    repaymentId: string,
+    ownerSessionHash: string,
+    amountMinor: number
+  ): Promise<{ record: AdvanceRecord; acquired: boolean }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<AdvanceRow & { owner_session_hash: string | null }>(
+        `SELECT record, owner_session_hash
+         FROM advances WHERE advance_id = $1 FOR UPDATE`,
+        [advanceId]
+      );
+      const row = result.rows[0];
+      if (!row || row.owner_session_hash !== ownerSessionHash) {
+        throw new StoreError("POSITION_NOT_FOUND");
+      }
+      const remaining = row.record.remainingPrincipalMinor ?? row.record.authorization.amountMinor;
+      if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0 || amountMinor > remaining) {
+        throw new StoreError("REPAYMENT_AMOUNT_INVALID");
+      }
+      if (row.record.state === "REPAYMENT_PENDING") {
+        if (row.record.repaymentId !== repaymentId) {
+          throw new StoreError("REPAYMENT_ALREADY_PENDING");
+        }
+        await client.query("COMMIT");
+        return { record: row.record, acquired: false };
+      }
+      if (row.record.repayments?.some((entry) => entry.repaymentId === repaymentId)) {
+        await client.query("COMMIT");
+        return { record: row.record, acquired: false };
+      }
+      if (row.record.state !== "FUNDED" || !row.record.funding) {
+        throw new StoreError("ADVANCE_NOT_REPAYABLE");
+      }
+      const record: AdvanceRecord = {
+        ...row.record,
+        state: "REPAYMENT_PENDING",
+        repaymentId,
+        repaymentProgress: null,
+        failureCode: null
+      };
+      await this.write(client, record);
+      await client.query("COMMIT");
+      return { record, acquired: true };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async recordRepaymentProgress(
     advanceId: string,
     progress: NonNullable<AdvanceRecord["repaymentProgress"]>
@@ -206,10 +284,29 @@ export class PostgresAdvanceStore implements AdvanceStore {
       if (record.state !== "REPAYMENT_PENDING" || record.repaymentId !== repayment.repaymentId) {
         throw new StoreError("REPAYMENT_COMPLETION_NOT_ALLOWED");
       }
+      const previousPrincipalMinor =
+        repayment.version === 2
+          ? repayment.previousPrincipalMinor
+          : (record.remainingPrincipalMinor ?? record.authorization.amountMinor);
+      const remainingPrincipalMinor =
+        repayment.version === 2 ? repayment.remainingPrincipalMinor : 0;
       return {
         ...record,
-        state: "REPAID",
+        state: remainingPrincipalMinor === 0 ? "REPAID" : "FUNDED",
         repayment,
+        repayments: [
+          ...(record.repayments ?? []),
+          {
+            repaymentId: repayment.repaymentId,
+            amountMinor: repayment.asset.amountMinor,
+            previousPrincipalMinor,
+            remainingPrincipalMinor,
+            createdAt: new Date().toISOString(),
+            result: repayment
+          }
+        ],
+        remainingPrincipalMinor,
+        repaymentProgress: null,
         failureCode: null
       };
     });
@@ -226,6 +323,112 @@ export class PostgresAdvanceStore implements AdvanceStore {
         failureCode
       };
     });
+  }
+
+  async beginLiquidation(
+    advanceId: string,
+    liquidationId: string,
+    ownerSessionHash: string
+  ): Promise<{ record: AdvanceRecord; acquired: boolean }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<AdvanceRow & { owner_session_hash: string | null }>(
+        `SELECT record, owner_session_hash
+         FROM advances WHERE advance_id = $1 FOR UPDATE`,
+        [advanceId]
+      );
+      const row = result.rows[0];
+      if (!row || row.owner_session_hash !== ownerSessionHash) {
+        throw new StoreError("POSITION_NOT_FOUND");
+      }
+      if (row.record.state === "LIQUIDATED") {
+        if (row.record.liquidationId !== liquidationId) {
+          throw new StoreError("ADVANCE_ALREADY_LIQUIDATED");
+        }
+        await client.query("COMMIT");
+        return { record: row.record, acquired: false };
+      }
+      if (row.record.state === "LIQUIDATION_PENDING") {
+        if (row.record.liquidationId !== liquidationId) {
+          throw new StoreError("LIQUIDATION_ALREADY_PENDING");
+        }
+        await client.query("COMMIT");
+        return { record: row.record, acquired: false };
+      }
+      if (row.record.state !== "FUNDED") throw new StoreError("ADVANCE_NOT_LIQUIDATABLE");
+      const record: AdvanceRecord = {
+        ...row.record,
+        state: "LIQUIDATION_PENDING",
+        liquidationId,
+        liquidationProgress: null,
+        failureCode: null
+      };
+      await this.write(client, record);
+      await client.query("COMMIT");
+      return { record, acquired: true };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async recordLiquidationProgress(
+    advanceId: string,
+    progress: NonNullable<AdvanceRecord["liquidationProgress"]>
+  ): Promise<AdvanceRecord> {
+    return this.update(advanceId, (record) => {
+      if (
+        record.state !== "LIQUIDATION_PENDING" ||
+        record.liquidationId !== progress.liquidationId
+      ) {
+        throw new StoreError("LIQUIDATION_PROGRESS_NOT_ALLOWED");
+      }
+      return { ...record, liquidationProgress: progress };
+    });
+  }
+
+  async completeLiquidation(
+    advanceId: string,
+    liquidation: NonNullable<AdvanceRecord["liquidation"]>
+  ): Promise<AdvanceRecord> {
+    return this.update(advanceId, (record) => {
+      if (
+        record.state !== "LIQUIDATION_PENDING" ||
+        record.liquidationId !== liquidation.liquidationId
+      ) {
+        throw new StoreError("LIQUIDATION_COMPLETION_NOT_ALLOWED");
+      }
+      return {
+        ...record,
+        state: "LIQUIDATED",
+        remainingPrincipalMinor: 0,
+        liquidation,
+        liquidationProgress: null,
+        failureCode: null
+      };
+    });
+  }
+
+  async failLiquidation(advanceId: string, failureCode: string): Promise<AdvanceRecord> {
+    return this.update(advanceId, (record) => {
+      if (record.state !== "LIQUIDATION_PENDING") {
+        throw new StoreError("LIQUIDATION_FAILURE_NOT_ALLOWED");
+      }
+      return { ...record, state: "LIQUIDATION_REVIEW_REQUIRED", failureCode };
+    });
+  }
+
+  async appendValuation(
+    advanceId: string,
+    observation: ValuationObservation
+  ): Promise<AdvanceRecord> {
+    return this.update(advanceId, (record) => ({
+      ...record,
+      valuations: [...(record.valuations ?? []), observation]
+    }));
   }
 
   async ping(): Promise<boolean> {

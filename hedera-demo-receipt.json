@@ -1,11 +1,11 @@
 {
   "network": "testnet",
-  "advanceId": "ub_b4e100ce4a0a47bb9930ab9d3cc85f26",
+  "advanceId": "ub_85c4c40ccfe343a18a92043420f79b90",
   "recipientAccountId": "0.0.9750175",
   "amountMinor": 1000,
   "amountStableUnits": "10000000",
   "funding": {
-    "version": 2,
+    "version": 3,
     "asset": {
       "tokenId": "0.0.9761970",
       "name": "USDC DEMO",
@@ -19,119 +19,73 @@
     },
     "note": {
       "tokenId": "0.0.9752761",
-      "serial": "6",
-      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/6",
-      "hashscanUrl": "https://hashscan.io/testnet/token/0.0.9752761/6"
+      "serial": "12",
+      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/12",
+      "hashscanUrl": "https://hashscan.io/testnet/token/0.0.9752761/12"
+    },
+    "collateral": {
+      "tokenId": "0.0.9763214",
+      "serial": "2",
+      "escrowAccountId": "0.0.9763209",
+      "label": "Synthetic demo collateral — no real shares or value",
+      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9763214/nfts/2",
+      "hashscanUrl": "https://hashscan.io/testnet/token/0.0.9763214/2"
     },
     "topic": {
       "topicId": "0.0.9751837",
-      "authorizationSequenceNumber": "13",
-      "fundedSequenceNumber": "14",
+      "authorizationSequenceNumber": "28",
+      "fundedSequenceNumber": "29",
       "hashscanUrl": "https://hashscan.io/testnet/topic/0.0.9751837"
     },
     "transactions": {
       "authorization": {
-        "transactionId": "0.0.9750175@1785037150.845338312",
-        "consensusTimestamp": "1785037159.035490550",
+        "transactionId": "0.0.9750175@1785042946.724400904",
+        "consensusTimestamp": "1785042951.822692120",
         "consensusStatus": "SUCCESS",
-        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785037150-845338312",
-        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785037159.035490550"
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785042946-724400904",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785042951.822692120"
       },
       "noteMint": {
-        "transactionId": "0.0.9750175@1785037157.886635632",
-        "consensusTimestamp": "1785037162.344522835",
+        "transactionId": "0.0.9750175@1785042947.165695486",
+        "consensusTimestamp": "1785042953.437469300",
         "consensusStatus": "SUCCESS",
-        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785037157-886635632",
-        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785037162.344522835"
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785042947-165695486",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785042953.437469300"
+      },
+      "collateralMint": {
+        "transactionId": "0.0.9750175@1785042951.880224436",
+        "consensusTimestamp": "1785042955.424066628",
+        "consensusStatus": "SUCCESS",
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785042951-880224436",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785042955.424066628"
       },
       "settlement": {
-        "transactionId": "0.0.9750175@1785037159.069869770",
-        "consensusTimestamp": "1785037164.376704776",
+        "transactionId": "0.0.9750175@1785042953.096740945",
+        "consensusTimestamp": "1785042957.937675723",
         "consensusStatus": "SUCCESS",
-        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785037159-069869770",
-        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785037164.376704776"
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785042953-096740945",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785042957.937675723"
       },
       "fundedEvent": {
-        "transactionId": "0.0.9750175@1785037158.769382459",
-        "consensusTimestamp": "1785037166.444159732",
+        "transactionId": "0.0.9750175@1785042954.942927472",
+        "consensusTimestamp": "1785042959.704242841",
         "consensusStatus": "SUCCESS",
-        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785037158-769382459",
-        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785037166.444159732"
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785042954-942927472",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785042959.704242841"
       }
     },
     "simulated": false
   },
-  "repayment": {
-    "version": 1,
-    "repaymentId": "ub_rp_80ab45267cbe41c290b1d4ec6b5b68c3",
-    "advanceId": "ub_b4e100ce4a0a47bb9930ab9d3cc85f26",
-    "payerAccountId": "0.0.9750175",
-    "treasuryAccountId": "0.0.9751835",
-    "asset": {
-      "tokenId": "0.0.9761970",
-      "name": "USDC DEMO",
-      "symbol": "USDC",
-      "decimals": 6,
-      "amountUnits": "10000000",
-      "amountMinor": 1000,
-      "label": "Demo USDC — no real value",
-      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9761970",
-      "hashscanUrl": "https://hashscan.io/testnet/token/0.0.9761970"
-    },
-    "note": {
-      "tokenId": "0.0.9752761",
-      "serial": "6",
-      "retired": true,
-      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/6",
-      "hashscanUrl": "https://hashscan.io/testnet/token/0.0.9752761/6"
-    },
-    "topic": {
-      "topicId": "0.0.9751837",
-      "authorizationSequenceNumber": "15",
-      "repaidSequenceNumber": "16",
-      "hashscanUrl": "https://hashscan.io/testnet/topic/0.0.9751837"
-    },
-    "transactions": {
-      "authorization": {
-        "transactionId": "0.0.9750175@1785037163.937059599",
-        "consensusTimestamp": "1785037168.904058769",
-        "consensusStatus": "SUCCESS",
-        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785037163-937059599",
-        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785037168.904058769"
-      },
-      "settlement": {
-        "transactionId": "0.0.9750175@1785037166.246071855",
-        "consensusTimestamp": "1785037170.516795563",
-        "consensusStatus": "SUCCESS",
-        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785037166-246071855",
-        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785037170.516795563"
-      },
-      "noteBurn": {
-        "transactionId": "0.0.9750175@1785037165.569467763",
-        "consensusTimestamp": "1785037172.084080612",
-        "consensusStatus": "SUCCESS",
-        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785037165-569467763",
-        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785037172.084080612"
-      },
-      "repaidEvent": {
-        "transactionId": "0.0.9750175@1785037170.068331055",
-        "consensusTimestamp": "1785037174.263779104",
-        "consensusStatus": "SUCCESS",
-        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785037170-068331055",
-        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785037174.263779104"
-      }
-    },
-    "remainingPrincipalMinor": 0,
-    "simulated": false
-  },
-  "generatedAt": "2026-07-26T03:39:35.814Z",
-  "mirrorVerifiedAt": "2026-07-26T03:39:39.938Z",
+  "repayment": null,
+  "generatedAt": "2026-07-26T05:16:01.028Z",
+  "mirrorVerifiedAt": "2026-07-26T05:16:40.181Z",
   "verification": {
     "transactions": {
-      "authorization": "1785037159.035490550",
-      "noteMint": "1785037162.344522835",
-      "settlement": "1785037164.376704776",
-      "fundedEvent": "1785037166.444159732"
+      "authorization": "1785042951.822692120",
+      "noteMint": "1785042953.437469300",
+      "collateralMint": "1785042955.424066628",
+      "settlement": "1785042957.937675723",
+      "fundedEvent": "1785042959.704242841"
     },
     "stablePayout": {
       "tokenId": "0.0.9761970",
@@ -140,33 +94,19 @@
       "totalSupply": "1000000000000000"
     },
     "nft": {
-      "owner": null,
-      "url": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/6"
+      "owner": "0.0.9751836",
+      "url": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/12"
+    },
+    "collateral": {
+      "tokenId": "0.0.9763214",
+      "serial": "2",
+      "owner": "0.0.9763209",
+      "mintConsensusTimestamp": "1785042955.424066628"
     },
     "hcs": {
-      "authorizationSequenceNumber": "13",
-      "fundedSequenceNumber": "14"
+      "authorizationSequenceNumber": "28",
+      "fundedSequenceNumber": "29"
     },
-    "repayment": {
-      "transactions": {
-        "authorization": "1785037168.904058769",
-        "settlement": "1785037170.516795563",
-        "noteBurn": "1785037172.084080612",
-        "repaidEvent": "1785037174.263779104"
-      },
-      "stableRepayment": {
-        "payer": "0.0.9750175",
-        "treasury": "0.0.9751835",
-        "amountUnits": "10000000"
-      },
-      "note": {
-        "returnedToTreasury": "0.0.9751835",
-        "deleted": true
-      },
-      "hcs": {
-        "authorizationSequenceNumber": "15",
-        "repaidSequenceNumber": "16"
-      }
-    }
+    "repayment": null
   }
 }

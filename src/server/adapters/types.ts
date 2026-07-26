@@ -4,6 +4,8 @@ import type {
   AssetSymbol,
   FundingProgress,
   FundingResult,
+  LiquidationProgress,
+  LiquidationResult,
   MarketSnapshot,
   PrivateCompanyListing,
   RepaymentProgress,
@@ -45,6 +47,10 @@ export interface FundingPacket {
   zeroGRequestId: string;
   zeroGProvider: string;
   zeroGTeeVerified: boolean;
+  assetSymbol: AssetSymbol;
+  grantType: AdvanceRequest["grant"]["grantType"];
+  vestedUnits: string;
+  strikePriceMinor: number;
 }
 
 export type FundingProgressRecorder = (progress: FundingProgress) => Promise<void>;
@@ -55,12 +61,32 @@ export interface RepaymentPacket {
   payerAccountId: string;
   amountMinor: number;
   amountStableUnits: bigint;
+  previousPrincipalMinor: number;
+  remainingPrincipalMinor: number;
   noteTokenId: string;
   noteSerial: string;
   issuanceSettlementTransactionId: string;
+  collateralTokenId?: string;
+  collateralSerial?: string;
+  collateralEscrowAccountId?: string;
 }
 
 export type RepaymentProgressRecorder = (progress: RepaymentProgress) => Promise<void>;
+
+export interface LiquidationPacket {
+  liquidationId: string;
+  advanceId: string;
+  emulatedPriceMinor: number;
+  liquidationPriceMinor: number;
+  remainingPrincipalMinor: number;
+  noteTokenId: string;
+  noteSerial: string;
+  collateralTokenId: string;
+  collateralSerial: string;
+  collateralEscrowAccountId: string;
+}
+
+export type LiquidationProgressRecorder = (progress: LiquidationProgress) => Promise<void>;
 
 export interface PaymentProvider {
   fund(packet: FundingPacket, recordProgress?: FundingProgressRecorder): Promise<FundingResult>;
@@ -68,6 +94,10 @@ export interface PaymentProvider {
     packet: RepaymentPacket,
     recordProgress?: RepaymentProgressRecorder
   ): Promise<RepaymentResult>;
+  liquidate?(
+    packet: LiquidationPacket,
+    recordProgress?: LiquidationProgressRecorder
+  ): Promise<LiquidationResult>;
   ready(): Promise<boolean>;
 }
 

@@ -5,6 +5,13 @@
   "poolAccountId": "0.0.9751836",
   "lifecycleTopicId": "0.0.9751837",
   "advanceNoteTokenId": "0.0.9752761",
+  "collateralEscrowAccountId": "0.0.9763209",
+  "collateralToken": {
+    "tokenId": "0.0.9763214",
+    "name": "unlockd.bond Demo Equity Collateral",
+    "symbol": "UBEQ",
+    "label": "Synthetic demo collateral — no real shares or value"
+  },
   "stableToken": {
     "tokenId": "0.0.9761970",
     "name": "USDC DEMO",
@@ -21,9 +28,11 @@
     "topic": "https://hashscan.io/testnet/topic/0.0.9751837",
     "token": "https://hashscan.io/testnet/token/0.0.9752761",
     "stableToken": "https://hashscan.io/testnet/token/0.0.9761970",
+    "collateralToken": "https://hashscan.io/testnet/token/0.0.9763214",
+    "collateralEscrow": "https://hashscan.io/testnet/account/0.0.9763209",
     "mirrorTopicMessages": "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.9751837/messages",
     "mirrorToken": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761"
   },
-  "generatedAt": "2026-07-26T03:50:48.266Z",
+  "generatedAt": "2026-07-26T05:14:24.251Z",
   "warning": "Hedera Testnet demo infrastructure only; not stock, collateral, or a legal receivable."
 }

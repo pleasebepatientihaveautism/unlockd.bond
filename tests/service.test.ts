@@ -109,16 +109,13 @@ describe("unlockd.bond service", () => {
       state: "REPAID",
       repaymentId,
       repayment: {
-        version: 1,
+        version: 2,
         repaymentId,
         remainingPrincipalMinor: 0,
         note: { retired: true },
         simulated: true
       },
-      repaymentProgress: {
-        stage: "REPAID",
-        repaymentId
-      }
+      repaymentProgress: null
     });
 
     const replay = await instance.repay(

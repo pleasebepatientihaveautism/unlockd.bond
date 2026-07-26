@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
@@ -9,6 +9,9 @@ import { PolicyError } from "../domain/policy.js";
 import {
   advanceRequestSchema,
   confirmationSchema,
+  liquidationPreviewRequestSchema,
+  liquidationRequestSchema,
+  positionRepaymentRequestSchema,
   repaymentRequestSchema
 } from "../domain/schemas.js";
 import type { AppConfig } from "./config.js";
@@ -31,7 +34,7 @@ function errorCode(error: unknown): string {
 }
 
 function statusFor(code: string): number {
-  if (code === "ADVANCE_NOT_FOUND") return 404;
+  if (code === "ADVANCE_NOT_FOUND" || code === "POSITION_NOT_FOUND") return 404;
   if (code.includes("HBAR") || code.includes("PAYER_BALANCE")) return 503;
   if (code.includes("TOKEN") || code === "ORIGIN_NOT_ALLOWED") return 403;
   if (code.includes("FUNDING") || code.includes("PARTNER") || code.includes("ZEROG")) return 502;
@@ -40,12 +43,29 @@ function statusFor(code: string): number {
     code.includes("NOT_FUNDABLE") ||
     code.includes("NOT_REPAYABLE") ||
     code.includes("ALREADY") ||
-    code.includes("REPAYMENT_REVIEW")
+    code.includes("REPAYMENT_REVIEW") ||
+    code.includes("LIQUIDATION_REVIEW")
   ) {
     return 409;
   }
-  if (code.includes("REPAYMENT") || code.includes("NOTE_BURN")) return 502;
+  if (code.includes("REPAYMENT") || code.includes("LIQUIDATION") || code.includes("NOTE_BURN")) {
+    return 502;
+  }
   return 422;
+}
+
+function mutationOriginAllowed(config: AppConfig, origin: string): boolean {
+  if (config.allowedOrigins.includes(origin)) return true;
+  if (config.NODE_ENV === "production") return false;
+  try {
+    const url = new URL(origin);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function createApp(deps: AppDependencies) {
@@ -69,6 +89,28 @@ export function createApp(deps: AppDependencies) {
     })
   );
   app.use(express.json({ limit: "32kb", strict: true }));
+  app.use((request, response, next) => {
+    const sessionCookie = request.headers.cookie
+      ?.split(";")
+      .map((value) => value.trim())
+      .find((value) => value.startsWith("unlockd_session="))
+      ?.slice("unlockd_session=".length);
+    const sessionId =
+      sessionCookie && /^[a-zA-Z0-9_-]{32,200}$/.test(sessionCookie)
+        ? sessionCookie
+        : randomBytes(32).toString("base64url");
+    if (!sessionCookie) {
+      const secure = deps.config.NODE_ENV === "production" ? "; Secure" : "";
+      response.setHeader(
+        "Set-Cookie",
+        `unlockd_session=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secure}`
+      );
+    }
+    response.locals.ownerSessionHash = createHmac("sha256", deps.config.CONFIRMATION_SECRET)
+      .update(`session:${sessionId}`)
+      .digest("hex");
+    next();
+  });
   app.use((request, response, next) => {
     const started = performance.now();
     const requestId = request.header("x-request-id")?.slice(0, 100) ?? randomUUID();
@@ -96,7 +138,7 @@ export function createApp(deps: AppDependencies) {
   app.use("/api", (request, _response, next) => {
     if (!["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) return next();
     const origin = request.header("origin");
-    if (origin && !deps.config.allowedOrigins.includes(origin)) {
+    if (origin && !mutationOriginAllowed(deps.config, origin)) {
       return next(new Error("ORIGIN_NOT_ALLOWED"));
     }
     return next();
@@ -150,7 +192,9 @@ export function createApp(deps: AppDependencies) {
       return;
     }
     response.setHeader("cache-control", "no-store");
-    response.status(201).json(await deps.service.evaluate(input));
+    response
+      .status(201)
+      .json(await deps.service.evaluate(input, String(response.locals.ownerSessionHash)));
   });
 
   app.post("/api/advances/:advanceId/fund", async (request, response) => {
@@ -191,6 +235,81 @@ export function createApp(deps: AppDependencies) {
   app.get("/api/advances/:advanceId/payoff", async (request, response) => {
     response.setHeader("cache-control", "no-store");
     response.json({ payoff: await deps.service.payoff(String(request.params.advanceId)) });
+  });
+
+  app.get("/api/positions", async (request, response) => {
+    const status = request.query.status === "closed" ? "closed" : "open";
+    response.setHeader("cache-control", "no-store");
+    response.json({
+      positions: await deps.service.positions(String(response.locals.ownerSessionHash), status)
+    });
+  });
+
+  app.get("/api/positions/:advanceId", async (request, response) => {
+    response.setHeader("cache-control", "no-store");
+    response.json({
+      position: await deps.service.position(
+        String(request.params.advanceId),
+        String(response.locals.ownerSessionHash)
+      )
+    });
+  });
+
+  app.get("/api/positions/:advanceId/valuations", async (request, response) => {
+    const position = await deps.service.position(
+      String(request.params.advanceId),
+      String(response.locals.ownerSessionHash)
+    );
+    response.setHeader("cache-control", "no-store");
+    response.json({ valuations: position.valuations });
+  });
+
+  app.post("/api/positions/:advanceId/repay", async (request, response) => {
+    const input = positionRepaymentRequestSchema.parse(request.body);
+    const idempotencyKey = request.header("idempotency-key");
+    if (!idempotencyKey || idempotencyKey !== input.repaymentId) {
+      response.status(422).json({ error: "IDEMPOTENCY_KEY_MISMATCH" });
+      return;
+    }
+    response.setHeader("cache-control", "no-store");
+    response.json(
+      await deps.service.repayPosition(
+        String(request.params.advanceId),
+        input.repaymentId,
+        input.amountMinor,
+        String(response.locals.ownerSessionHash)
+      )
+    );
+  });
+
+  app.post("/api/positions/:advanceId/liquidation/preview", async (request, response) => {
+    const input = liquidationPreviewRequestSchema.parse(request.body);
+    response.setHeader("cache-control", "no-store");
+    response.json({
+      preview: await deps.service.liquidationPreview(
+        String(request.params.advanceId),
+        input.emulatedPriceMinor,
+        String(response.locals.ownerSessionHash)
+      )
+    });
+  });
+
+  app.post("/api/positions/:advanceId/liquidate", async (request, response) => {
+    const input = liquidationRequestSchema.parse(request.body);
+    const idempotencyKey = request.header("idempotency-key");
+    if (!idempotencyKey || idempotencyKey !== input.liquidationId) {
+      response.status(422).json({ error: "IDEMPOTENCY_KEY_MISMATCH" });
+      return;
+    }
+    response.setHeader("cache-control", "no-store");
+    response.json(
+      await deps.service.liquidatePosition(
+        String(request.params.advanceId),
+        input.liquidationId,
+        input.emulatedPriceMinor,
+        String(response.locals.ownerSessionHash)
+      )
+    );
   });
 
   if (deps.config.NODE_ENV === "production") {

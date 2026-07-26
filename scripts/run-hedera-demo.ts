@@ -1,7 +1,11 @@
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { fundingResultV2Schema, repaymentResultSchema } from "../src/domain/schemas.js";
+import {
+  fundingResultV2Schema,
+  fundingResultV3Schema,
+  repaymentResultSchema
+} from "../src/domain/schemas.js";
 
 const baseUrl = process.env.UNLOCKD_API_URL ?? "http://localhost:3000";
 const operatorId = process.env.HEDERA_OPERATOR_ID;
@@ -69,7 +73,7 @@ const funded = (await fundedResponse.json()) as {
 if (!fundedResponse.ok || funded.advance?.state !== "FUNDED") {
   throw new Error(funded.error ?? "DEMO_FUNDING_FAILED");
 }
-const funding = fundingResultV2Schema.parse(funded.advance.funding);
+const funding = fundingResultV3Schema.or(fundingResultV2Schema).parse(funded.advance.funding);
 if (
   funding.simulated ||
   !Object.values(funding.transactions).every(

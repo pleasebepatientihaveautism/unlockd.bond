@@ -202,7 +202,7 @@ export const fundingTransactionSchema = z
   })
   .strict();
 
-export const fundingProgressSchema = z
+const fundingProgressV2Schema = z
   .object({
     version: z.literal(2),
     stage: z.enum(["AUTHORIZED", "NOTE_MINTED", "SETTLED", "FUNDED"]),
@@ -219,6 +219,28 @@ export const fundingProgressSchema = z
     fundedSequenceNumber: z.string().regex(/^\d+$/).optional()
   })
   .strict();
+
+const fundingProgressV3Schema = z
+  .object({
+    version: z.literal(3),
+    stage: z.enum(["AUTHORIZED", "NOTE_MINTED", "COLLATERAL_MINTED", "SETTLED", "FUNDED"]),
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema.optional(),
+        noteMint: fundingTransactionSchema.optional(),
+        collateralMint: fundingTransactionSchema.optional(),
+        settlement: fundingTransactionSchema.optional(),
+        fundedEvent: fundingTransactionSchema.optional()
+      })
+      .strict(),
+    noteSerial: z.string().regex(/^\d+$/).optional(),
+    collateralSerial: z.string().regex(/^\d+$/).optional(),
+    authorizationSequenceNumber: z.string().regex(/^\d+$/).optional(),
+    fundedSequenceNumber: z.string().regex(/^\d+$/).optional()
+  })
+  .strict();
+
+export const fundingProgressSchema = z.union([fundingProgressV2Schema, fundingProgressV3Schema]);
 
 export const fundingResultV2Schema = z
   .object({
@@ -264,7 +286,40 @@ export const fundingResultV2Schema = z
   })
   .strict();
 
-export const fundingResultSchema = z.union([fundingResultV2Schema, fundingResultV1Schema]);
+export const fundingResultV3Schema = z
+  .object({
+    version: z.literal(3),
+    asset: fundingResultV2Schema.shape.asset,
+    note: fundingResultV2Schema.shape.note,
+    collateral: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        serial: z.string().regex(/^\d+$/),
+        escrowAccountId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        label: z.literal("Synthetic demo collateral — no real shares or value"),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    topic: fundingResultV2Schema.shape.topic,
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema,
+        noteMint: fundingTransactionSchema,
+        collateralMint: fundingTransactionSchema,
+        settlement: fundingTransactionSchema,
+        fundedEvent: fundingTransactionSchema
+      })
+      .strict(),
+    simulated: z.boolean()
+  })
+  .strict();
+
+export const fundingResultSchema = z.union([
+  fundingResultV3Schema,
+  fundingResultV2Schema,
+  fundingResultV1Schema
+]);
 
 export const repaymentProgressSchema = z
   .object({
@@ -334,6 +389,115 @@ export const repaymentResultSchema = z
   })
   .strict();
 
+export const repaymentResultV2Schema = z
+  .object({
+    version: z.literal(2),
+    repaymentId: z.string().regex(/^ub_rp_[a-zA-Z0-9_-]{8,80}$/),
+    advanceId: z.string().regex(/^ub_[a-zA-Z0-9_-]{8,80}$/),
+    payerAccountId: z.string().regex(/^0\.0\.\d{3,12}$/),
+    treasuryAccountId: z.string().regex(/^0\.0\.\d{3,12}$/),
+    kind: z.enum(["PARTIAL", "FULL"]),
+    asset: repaymentResultSchema.shape.asset,
+    note: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        serial: z.string().regex(/^\d+$/),
+        retired: z.boolean(),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    collateral: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        serial: z.string().regex(/^\d+$/),
+        released: z.boolean(),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    topic: z
+      .object({
+        topicId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        authorizationSequenceNumber: z.string().regex(/^\d+$/),
+        completionSequenceNumber: z.string().regex(/^\d+$/),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema,
+        settlement: fundingTransactionSchema,
+        noteBurn: fundingTransactionSchema.optional(),
+        completionEvent: fundingTransactionSchema
+      })
+      .strict(),
+    previousPrincipalMinor: positiveMinor,
+    remainingPrincipalMinor: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    simulated: z.boolean()
+  })
+  .strict();
+
+export const repaymentResultAnySchema = z.union([repaymentResultV2Schema, repaymentResultSchema]);
+
+export const liquidationProgressSchema = z
+  .object({
+    version: z.literal(1),
+    liquidationId: z.string().regex(/^ub_liq_[a-zA-Z0-9_-]{8,80}$/),
+    stage: z.enum(["AUTHORIZED", "SETTLED", "NOTE_RETIRED", "LIQUIDATED"]),
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema.optional(),
+        settlement: fundingTransactionSchema.optional(),
+        noteBurn: fundingTransactionSchema.optional(),
+        liquidatedEvent: fundingTransactionSchema.optional()
+      })
+      .strict(),
+    authorizationSequenceNumber: z.string().regex(/^\d+$/).optional(),
+    liquidatedSequenceNumber: z.string().regex(/^\d+$/).optional()
+  })
+  .strict();
+
+export const liquidationResultSchema = z
+  .object({
+    version: z.literal(1),
+    liquidationId: z.string().regex(/^ub_liq_[a-zA-Z0-9_-]{8,80}$/),
+    advanceId: z.string().regex(/^ub_[a-zA-Z0-9_-]{8,80}$/),
+    emulatedPriceMinor: positiveMinor,
+    liquidationPriceMinor: positiveMinor,
+    remainingPrincipalMinor: z.literal(0),
+    collateral: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        serial: z.string().regex(/^\d+$/),
+        escrowAccountId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        label: z.literal("Synthetic demo collateral — no real shares or value"),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url(),
+        transferredToPool: z.literal(true)
+      })
+      .strict(),
+    note: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        serial: z.string().regex(/^\d+$/),
+        retired: z.literal(true),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema,
+        settlement: fundingTransactionSchema,
+        noteBurn: fundingTransactionSchema,
+        liquidatedEvent: fundingTransactionSchema
+      })
+      .strict(),
+    simulated: z.boolean()
+  })
+  .strict();
+
 export type AdvanceRequest = z.infer<typeof advanceRequestSchema>;
 export type AssetSymbol = z.infer<typeof assetSymbolSchema>;
 export type MarketSnapshot = z.infer<typeof marketSnapshotSchema>;
@@ -341,10 +505,14 @@ export type RiskDecision = z.infer<typeof riskDecisionSchema>;
 export type RiskReceipt = z.infer<typeof riskReceiptSchema>;
 export type FundingResult = z.infer<typeof fundingResultSchema>;
 export type FundingResultV2 = z.infer<typeof fundingResultV2Schema>;
+export type FundingResultV3 = z.infer<typeof fundingResultV3Schema>;
 export type FundingProgress = z.infer<typeof fundingProgressSchema>;
 export type FundingTransaction = z.infer<typeof fundingTransactionSchema>;
 export type RepaymentProgress = z.infer<typeof repaymentProgressSchema>;
-export type RepaymentResult = z.infer<typeof repaymentResultSchema>;
+export type RepaymentResult = z.infer<typeof repaymentResultAnySchema>;
+export type RepaymentResultV2 = z.infer<typeof repaymentResultV2Schema>;
+export type LiquidationProgress = z.infer<typeof liquidationProgressSchema>;
+export type LiquidationResult = z.infer<typeof liquidationResultSchema>;
 export type PrivateCompanyListing = z.infer<typeof privateCompanyListingSchema>;
 
 export const confirmationSchema = z
@@ -357,5 +525,25 @@ export const repaymentRequestSchema = z
   .object({
     repaymentId: z.string().regex(/^ub_rp_[a-zA-Z0-9_-]{8,80}$/),
     confirmationToken: z.string().min(32).max(300)
+  })
+  .strict();
+
+export const positionRepaymentRequestSchema = z
+  .object({
+    repaymentId: z.string().regex(/^ub_rp_[a-zA-Z0-9_-]{8,80}$/),
+    amountMinor: positiveMinor
+  })
+  .strict();
+
+export const liquidationPreviewRequestSchema = z
+  .object({
+    emulatedPriceMinor: positiveMinor
+  })
+  .strict();
+
+export const liquidationRequestSchema = z
+  .object({
+    liquidationId: z.string().regex(/^ub_liq_[a-zA-Z0-9_-]{8,80}$/),
+    emulatedPriceMinor: positiveMinor
   })
   .strict();

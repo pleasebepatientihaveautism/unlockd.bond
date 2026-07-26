@@ -2,6 +2,11 @@ import { createHmac, randomUUID } from "node:crypto";
 import { confirmationDigest, saltedCommitment, sha256 } from "../domain/canonical.js";
 import { authorizeAdvance } from "../domain/policy.js";
 import {
+  calculateLiquidationPriceMinor,
+  type PositionView,
+  positionMaturity
+} from "../domain/positions.js";
+import {
   calculateAdvancePricing,
   calculateCompanyRiskSignal,
   calculateEquityLtvCapMinor,
@@ -17,7 +22,6 @@ import {
 import type {
   AdvanceRequest,
   AssetSymbol,
-  FundingResultV2,
   MarketSnapshot,
   PrivateCompanyListing
 } from "../domain/schemas.js";
@@ -78,7 +82,10 @@ export class UnlockdBondService {
     return this.deps.market.listPrivateCompanies();
   }
 
-  async evaluate(request: AdvanceRequest): Promise<{
+  async evaluate(
+    request: AdvanceRequest,
+    ownerSessionHash?: string
+  ): Promise<{
     advance: CustomerAdvance;
     confirmationToken: string | null;
     idempotentReplay: boolean;
@@ -142,6 +149,25 @@ export class UnlockdBondService {
       termDays: request.request.termDays,
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+      ownerSessionHash,
+      grant: request.grant,
+      fundedAt: null,
+      maturityAt: null,
+      remainingPrincipalMinor: authorization.amountMinor,
+      valuations: [
+        {
+          observedAt: new Date(market.priceUpdatedAt * 1000).toISOString(),
+          priceUsdMinor: market.priceUsdMinor,
+          source: market.source,
+          kind: market.evidenceType === "PRIVATE_VALUATION" ? "VALUATION" : "LIVE",
+          evidenceUrl: market.externalEvidenceUrl ?? null
+        }
+      ],
+      collateral: null,
+      repayments: [],
+      liquidation: null,
+      liquidationId: null,
+      liquidationProgress: null,
       employeeCommitment: employeeCommitment.commitment,
       decisionCommitment: decisionCommitment.commitment,
       marketCommitment: marketCommitment.commitment,
@@ -201,7 +227,12 @@ export class UnlockdBondService {
           graphDeployment: record.market.subgraphDeployment,
           zeroGRequestId: record.riskReceipt.requestId,
           zeroGProvider: record.riskReceipt.provider,
-          zeroGTeeVerified: record.riskReceipt.teeVerified
+          zeroGTeeVerified: record.riskReceipt.teeVerified,
+          assetSymbol: record.grant?.assetSymbol ?? record.market.assetSymbol,
+          grantType:
+            record.grant?.grantType ?? (record.pricing.strikePriceMinor > 0 ? "OPTION" : "RSU"),
+          vestedUnits: record.grant?.vestedUnits ?? this.legacyVestedUnits(record),
+          strikePriceMinor: record.grant?.strikePriceMinor ?? record.pricing.strikePriceMinor
         },
         async (progress) => {
           await this.deps.store.recordFundingProgress(advanceId, progress);
@@ -241,11 +272,14 @@ export class UnlockdBondService {
         throw new Error("REPAYMENT_PAYER_CONFIG_CHANGED");
       }
       const funding = record.funding;
-      if (!funding || !("version" in funding) || funding.version !== 2) {
-        throw new Error("REPAYMENT_REQUIRES_V2_RECEIPT");
-      }
+      if (!funding) throw new Error("REPAYMENT_RECEIPT_REQUIRED");
       const result = await this.deps.payment.repay(
-        this.repaymentPacket(record, funding, repaymentId),
+        this.repaymentPacket(
+          record,
+          funding,
+          repaymentId,
+          record.remainingPrincipalMinor ?? record.authorization.amountMinor
+        ),
         async (progress) => {
           await this.deps.store.recordRepaymentProgress(advanceId, progress);
         }
@@ -273,6 +307,161 @@ export class UnlockdBondService {
     return record ? toPublicAdvance(record) : null;
   }
 
+  async positions(ownerSessionHash: string, status: "open" | "closed"): Promise<PositionView[]> {
+    const records = await this.deps.store.listByOwner(ownerSessionHash);
+    const acceptedStates =
+      status === "open"
+        ? new Set([
+            "FUNDED",
+            "REPAYMENT_PENDING",
+            "REPAYMENT_REVIEW_REQUIRED",
+            "LIQUIDATION_PENDING",
+            "LIQUIDATION_REVIEW_REQUIRED"
+          ])
+        : new Set(["REPAID", "LIQUIDATED"]);
+    return records
+      .filter((record) => acceptedStates.has(record.state))
+      .map((record) => this.positionView(record));
+  }
+
+  async position(advanceId: string, ownerSessionHash: string): Promise<PositionView> {
+    const record = await this.deps.store.get(advanceId);
+    if (!record || record.ownerSessionHash !== ownerSessionHash) {
+      throw new Error("POSITION_NOT_FOUND");
+    }
+    if (!record.funding) throw new Error("POSITION_NOT_FUNDED");
+    return this.positionView(record);
+  }
+
+  async repayPosition(
+    advanceId: string,
+    repaymentId: string,
+    amountMinor: number,
+    ownerSessionHash: string
+  ): Promise<{ position: PositionView; idempotentReplay: boolean }> {
+    const begun = await this.deps.store.beginPositionRepayment(
+      advanceId,
+      repaymentId,
+      ownerSessionHash,
+      amountMinor
+    );
+    if (!begun.acquired) {
+      return { position: this.positionView(begun.record), idempotentReplay: true };
+    }
+    try {
+      const record = begun.record;
+      const funding = record.funding;
+      if (!funding || !("version" in funding) || funding.version < 2) {
+        throw new Error("REPAYMENT_REQUIRES_V2_RECEIPT");
+      }
+      const result = await this.deps.payment.repay(
+        this.repaymentPacket(record, funding, repaymentId, amountMinor),
+        async (progress) => {
+          await this.deps.store.recordRepaymentProgress(advanceId, progress);
+        }
+      );
+      if (
+        this.deps.config.mode !== "demo" &&
+        (result.simulated ||
+          !Object.values(result.transactions).every(
+            (transaction) => transaction.consensusStatus === "SUCCESS"
+          ))
+      ) {
+        throw new Error("HEDERA_REPAYMENT_CONSENSUS_SUCCESS_REQUIRED");
+      }
+      const completed = await this.deps.store.completeRepayment(advanceId, result);
+      return { position: this.positionView(completed), idempotentReplay: false };
+    } catch (error) {
+      const failureCode = safeFailureCode(error);
+      await this.deps.store.failRepayment(advanceId, failureCode);
+      throw failureCode === "PARTNER_OPERATION_FAILED" ? error : new Error(failureCode);
+    }
+  }
+
+  async liquidationPreview(
+    advanceId: string,
+    emulatedPriceMinor: number,
+    ownerSessionHash: string
+  ) {
+    const position = await this.position(advanceId, ownerSessionHash);
+    if (!Number.isSafeInteger(emulatedPriceMinor) || emulatedPriceMinor <= 0) {
+      throw new Error("EMULATED_PRICE_INVALID");
+    }
+    return {
+      advanceId,
+      emulatedPriceMinor,
+      liquidationPriceMinor: position.liquidationPriceMinor,
+      wouldLiquidate: emulatedPriceMinor < position.liquidationPriceMinor,
+      remainingPrincipalMinor: position.remainingPrincipalMinor,
+      label: "Synthetic price preview — no real market execution"
+    };
+  }
+
+  async liquidatePosition(
+    advanceId: string,
+    liquidationId: string,
+    emulatedPriceMinor: number,
+    ownerSessionHash: string
+  ): Promise<{ position: PositionView; idempotentReplay: boolean }> {
+    const preview = await this.liquidationPreview(advanceId, emulatedPriceMinor, ownerSessionHash);
+    if (!preview.wouldLiquidate) throw new Error("LIQUIDATION_THRESHOLD_NOT_CROSSED");
+    const begun = await this.deps.store.beginLiquidation(
+      advanceId,
+      liquidationId,
+      ownerSessionHash
+    );
+    if (!begun.acquired) {
+      return { position: this.positionView(begun.record), idempotentReplay: true };
+    }
+    try {
+      const record = begun.record;
+      const funding = record.funding;
+      if (!funding || !("version" in funding) || funding.version !== 3) {
+        throw new Error("LIQUIDATION_REQUIRES_V3_RECEIPT");
+      }
+      if (!this.deps.payment.liquidate) throw new Error("LIQUIDATION_PROVIDER_UNAVAILABLE");
+      const result = await this.deps.payment.liquidate(
+        {
+          liquidationId,
+          advanceId,
+          emulatedPriceMinor,
+          liquidationPriceMinor: preview.liquidationPriceMinor,
+          remainingPrincipalMinor: preview.remainingPrincipalMinor,
+          noteTokenId: funding.note.tokenId,
+          noteSerial: funding.note.serial,
+          collateralTokenId: funding.collateral.tokenId,
+          collateralSerial: funding.collateral.serial,
+          collateralEscrowAccountId: funding.collateral.escrowAccountId
+        },
+        async (progress) => {
+          await this.deps.store.recordLiquidationProgress(advanceId, progress);
+        }
+      );
+      if (
+        this.deps.config.mode !== "demo" &&
+        (result.simulated ||
+          !Object.values(result.transactions).every(
+            (transaction) => transaction.consensusStatus === "SUCCESS"
+          ))
+      ) {
+        throw new Error("HEDERA_LIQUIDATION_CONSENSUS_SUCCESS_REQUIRED");
+      }
+      await this.deps.store.completeLiquidation(advanceId, result);
+      const completed = await this.deps.store.appendValuation(advanceId, {
+        observedAt: new Date().toISOString(),
+        priceUsdMinor: emulatedPriceMinor,
+        source: "user-confirmed-emulator",
+        kind: "EMULATED",
+        evidenceUrl: null
+      });
+      return { position: this.positionView(completed), idempotentReplay: false };
+    } catch (error) {
+      const failureCode = safeFailureCode(error);
+      await this.deps.store.failLiquidation(advanceId, failureCode);
+      throw failureCode === "PARTNER_OPERATION_FAILED" ? error : new Error(failureCode);
+    }
+  }
+
   async payoff(advanceId: string) {
     const record = await this.deps.store.get(advanceId);
     if (!record) throw new Error("ADVANCE_NOT_FOUND");
@@ -281,14 +470,16 @@ export class UnlockdBondService {
     ) {
       throw new Error("ADVANCE_NOT_REPAYABLE");
     }
-    const principalMinor = record.state === "REPAID" ? 0 : record.authorization.amountMinor;
+    const principalMinor =
+      record.state === "REPAID" || record.state === "LIQUIDATED"
+        ? 0
+        : (record.remainingPrincipalMinor ?? record.authorization.amountMinor);
     return {
       advanceId: record.advanceId,
       state: record.state,
       payerAccountId: record.recipientAccountId,
-      dueAt: new Date(
-        new Date(record.createdAt).getTime() + record.termDays * 24 * 60 * 60 * 1000
-      ).toISOString(),
+      dueAt:
+        record.maturityAt ?? positionMaturity(record.fundedAt ?? record.createdAt, record.termDays),
       principalMinor,
       interestMinor: 0,
       feesMinor: 0,
@@ -323,16 +514,100 @@ export class UnlockdBondService {
     });
   }
 
-  private repaymentPacket(record: AdvanceRecord, funding: FundingResultV2, repaymentId: string) {
+  private repaymentPacket(
+    record: AdvanceRecord,
+    funding: NonNullable<AdvanceRecord["funding"]>,
+    repaymentId: string,
+    amountMinor: number
+  ) {
+    const previousPrincipalMinor =
+      record.remainingPrincipalMinor ?? record.authorization.amountMinor;
+    const remainingPrincipalMinor = previousPrincipalMinor - amountMinor;
     return {
       repaymentId,
       advanceId: record.advanceId,
       payerAccountId: record.recipientAccountId,
-      amountMinor: record.authorization.amountMinor,
-      amountStableUnits: usdMinorToStableUnits(record.authorization.amountMinor),
-      noteTokenId: funding.note.tokenId,
-      noteSerial: funding.note.serial,
-      issuanceSettlementTransactionId: funding.transactions.settlement.transactionId
+      amountMinor,
+      amountStableUnits: usdMinorToStableUnits(amountMinor),
+      previousPrincipalMinor,
+      remainingPrincipalMinor,
+      noteTokenId: "version" in funding ? funding.note.tokenId : funding.noteTokenId,
+      noteSerial: "version" in funding ? funding.note.serial : funding.noteSerial,
+      issuanceSettlementTransactionId:
+        "version" in funding ? funding.transactions.settlement.transactionId : funding.paymentTxId,
+      collateralTokenId:
+        "version" in funding && funding.version === 3 ? funding.collateral.tokenId : undefined,
+      collateralSerial:
+        "version" in funding && funding.version === 3 ? funding.collateral.serial : undefined,
+      collateralEscrowAccountId:
+        "version" in funding && funding.version === 3
+          ? funding.collateral.escrowAccountId
+          : undefined
     };
+  }
+
+  private positionView(record: AdvanceRecord): PositionView {
+    if (!record.funding) throw new Error("POSITION_NOT_FUNDED");
+    const fundedAt =
+      record.fundedAt ??
+      ("version" in record.funding
+        ? record.funding.transactions.settlement.consensusTimestamp
+        : record.funding.consensusTimestamp);
+    const grant = record.grant ?? {
+      assetSymbol: record.market.assetSymbol,
+      companyIdentifier: record.market.assetSymbol,
+      grantType: record.pricing.strikePriceMinor > 0 ? ("OPTION" as const) : ("RSU" as const),
+      vestedUnits: this.legacyVestedUnits(record),
+      strikePriceMinor: record.pricing.strikePriceMinor,
+      referenceSharePriceMinor: record.pricing.referenceSharePriceMinor,
+      valuationDate: record.pricing.evidenceDate,
+      valuationSource:
+        record.pricing.valuationSource === "PUBLIC_MARKET"
+          ? ("PUBLIC_MARKET" as const)
+          : ("SYNTHETIC" as const),
+      transferRestricted: true as const,
+      attestationCommitment: `sha256:${"0".repeat(64)}`
+    };
+    const remainingPrincipalMinor =
+      record.remainingPrincipalMinor ??
+      (record.state === "REPAID" || record.state === "LIQUIDATED"
+        ? 0
+        : record.authorization.amountMinor);
+    return {
+      advance: toCustomerAdvance({ ...record, grant }),
+      grantSummary: {
+        assetSymbol: grant.assetSymbol,
+        grantType: grant.grantType,
+        strikePriceMinor: grant.strikePriceMinor
+      },
+      originalPrincipalMinor: record.authorization.amountMinor,
+      remainingPrincipalMinor,
+      fundedAt,
+      maturityAt: record.maturityAt ?? positionMaturity(fundedAt, record.termDays),
+      liquidationPriceMinor: calculateLiquidationPriceMinor(remainingPrincipalMinor, grant),
+      valuations:
+        record.valuations && record.valuations.length > 0
+          ? record.valuations
+          : [
+              {
+                observedAt: new Date(record.market.priceUpdatedAt * 1000).toISOString(),
+                priceUsdMinor: record.market.priceUsdMinor,
+                source: record.market.source,
+                kind: record.market.evidenceType === "PRIVATE_VALUATION" ? "VALUATION" : "LIVE",
+                evidenceUrl: record.market.externalEvidenceUrl ?? null
+              }
+            ],
+      collateral:
+        record.collateral ??
+        ("version" in record.funding && record.funding.version === 3
+          ? record.funding.collateral
+          : null)
+    };
+  }
+
+  private legacyVestedUnits(record: AdvanceRecord): string {
+    const perUnit = record.pricing.netValuePerOptionMinor;
+    if (perUnit <= 0) return "0.000001";
+    return (record.pricing.grossEquityValueMinor / perUnit).toFixed(6);
   }
 }
