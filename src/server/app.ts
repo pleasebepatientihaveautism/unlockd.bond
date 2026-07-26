@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
@@ -36,7 +36,13 @@ function errorCode(error: unknown): string {
 function statusFor(code: string): number {
   if (code === "ADVANCE_NOT_FOUND" || code === "POSITION_NOT_FOUND") return 404;
   if (code.includes("HBAR") || code.includes("PAYER_BALANCE")) return 503;
-  if (code.includes("TOKEN") || code === "ORIGIN_NOT_ALLOWED") return 403;
+  if (
+    code.includes("TOKEN") ||
+    code === "ORIGIN_NOT_ALLOWED" ||
+    code === "SETTLEMENT_AUTH_REQUIRED"
+  ) {
+    return 403;
+  }
   if (code.includes("FUNDING") || code.includes("PARTNER") || code.includes("ZEROG")) return 502;
   if (
     code.includes("EXPIRED") ||
@@ -66,6 +72,25 @@ function mutationOriginAllowed(config: AppConfig, origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isSettlementMutation(request: Request): boolean {
+  if (request.method !== "POST") return false;
+  const requestPath = request.originalUrl.split("?")[0];
+  return (
+    /^\/api\/advances\/[^/]+\/(?:fund|repay)$/.test(requestPath) ||
+    /^\/api\/positions\/[^/]+\/(?:repay|liquidate)$/.test(requestPath)
+  );
+}
+
+function settlementAuthorized(config: AppConfig, authorization: string | undefined): boolean {
+  if (config.mode === "demo") return true;
+  const expected = config.SETTLEMENT_AUTH_SECRET;
+  const presented = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!expected || !presented) return false;
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  const presentedDigest = createHash("sha256").update(presented).digest();
+  return timingSafeEqual(expectedDigest, presentedDigest);
 }
 
 export function createApp(deps: AppDependencies) {
@@ -140,6 +165,15 @@ export function createApp(deps: AppDependencies) {
     const origin = request.header("origin");
     if (origin && !mutationOriginAllowed(deps.config, origin)) {
       return next(new Error("ORIGIN_NOT_ALLOWED"));
+    }
+    return next();
+  });
+  app.use("/api", (request, _response, next) => {
+    if (
+      isSettlementMutation(request) &&
+      !settlementAuthorized(deps.config, request.header("authorization"))
+    ) {
+      return next(new Error("SETTLEMENT_AUTH_REQUIRED"));
     }
     return next();
   });

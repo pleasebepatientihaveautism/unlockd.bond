@@ -4,7 +4,7 @@ import { parse } from "dotenv";
 import {
   fundingResultV2Schema,
   fundingResultV3Schema,
-  repaymentResultSchema
+  repaymentResultAnySchema
 } from "../src/domain/schemas.js";
 
 const mirrorUrl = "https://testnet.mirrornode.hedera.com";
@@ -17,7 +17,7 @@ const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
   [key: string]: unknown;
 };
 const funding = fundingResultV3Schema.or(fundingResultV2Schema).parse(receipt.funding);
-const repayment = receipt.repayment ? repaymentResultSchema.parse(receipt.repayment) : null;
+const repayment = receipt.repayment ? repaymentResultAnySchema.parse(receipt.repayment) : null;
 if (!receipt.recipientAccountId) throw new Error("RECIPIENT_ACCOUNT_REQUIRED");
 
 async function retry<T>(label: string, check: () => Promise<T | null>): Promise<T> {
@@ -99,9 +99,11 @@ if (funding.version === 3) {
     );
     if (!response.ok) return null;
     const body = (await response.json()) as { account_id?: string; deleted?: boolean };
-    return body.deleted !== true && body.account_id === funding.collateral.escrowAccountId
-      ? body
-      : null;
+    const expectedOwner =
+      repayment?.version === 2 && repayment.kind === "FULL" && repayment.collateral.released
+        ? repayment.payerAccountId
+        : funding.collateral.escrowAccountId;
+    return body.deleted !== true && body.account_id === expectedOwner ? body : null;
   });
   collateralVerification = {
     tokenId: funding.collateral.tokenId,
@@ -179,12 +181,18 @@ const stableToken = await retry("STABLE_TOKEN", async () => {
 
 let repaymentVerification = null;
 if (repayment) {
-  const [repaymentAuthorization, repaymentSettlement, noteBurn, repaidEvent] = await Promise.all([
-    confirmedTransaction(repayment.transactions.authorization.transactionId),
-    confirmedTransaction(repayment.transactions.settlement.transactionId),
-    confirmedTransaction(repayment.transactions.noteBurn.transactionId),
-    confirmedTransaction(repayment.transactions.repaidEvent.transactionId)
-  ]);
+  const completionTransaction =
+    repayment.version === 2
+      ? repayment.transactions.completionEvent
+      : repayment.transactions.repaidEvent;
+  const noteBurnTransaction = repayment.transactions.noteBurn;
+  const [repaymentAuthorization, repaymentSettlement, noteBurn, completionEvent] =
+    await Promise.all([
+      confirmedTransaction(repayment.transactions.authorization.transactionId),
+      confirmedTransaction(repayment.transactions.settlement.transactionId),
+      noteBurnTransaction ? confirmedTransaction(noteBurnTransaction.transactionId) : null,
+      confirmedTransaction(completionTransaction.transactionId)
+    ]);
   const repaymentUnits = Number(repayment.asset.amountUnits);
   if (!Number.isSafeInteger(repaymentUnits)) throw new Error("REPAYMENT_AMOUNT_OUT_OF_RANGE");
   const payerDebit = repaymentSettlement.token_transfers?.find(
@@ -208,25 +216,51 @@ if (repayment) {
       entry.receiver_account_id === repayment.treasuryAccountId
   );
   if (!repaymentNftTransfer) throw new Error("NOTE_RETURN_NOT_CONFIRMED");
+  const collateralRelease =
+    repayment.version === 2 && repayment.kind === "FULL" && repayment.collateral.released
+      ? repaymentSettlement.nft_transfers?.find(
+          (entry) =>
+            entry.token_id === repayment.collateral.tokenId &&
+            String(entry.serial_number) === repayment.collateral.serial &&
+            entry.sender_account_id ===
+              (funding.version === 3 ? funding.collateral.escrowAccountId : "") &&
+            entry.receiver_account_id === repayment.payerAccountId
+        )
+      : null;
+  if (
+    repayment.version === 2 &&
+    repayment.kind === "FULL" &&
+    repayment.collateral.released &&
+    !collateralRelease
+  ) {
+    throw new Error("COLLATERAL_RELEASE_NOT_CONFIRMED");
+  }
   const repaymentAuthorizationMessage = await hcsMessage(
     repayment.topic.authorizationSequenceNumber,
     (message) =>
       message.event === "REPAYMENT_AUTHORIZED" && message.repaymentId === repayment.repaymentId
   );
-  const repaidMessage = await hcsMessage(repayment.topic.repaidSequenceNumber, (message) => {
+  const completionSequenceNumber =
+    repayment.version === 2
+      ? repayment.topic.completionSequenceNumber
+      : repayment.topic.repaidSequenceNumber;
+  const completionMessage = await hcsMessage(completionSequenceNumber, (message) => {
     return (
-      message.event === "ADVANCE_REPAID" &&
+      message.event ===
+        (repayment.version === 2 && repayment.kind === "PARTIAL"
+          ? "ADVANCE_PARTIALLY_REPAID"
+          : "ADVANCE_REPAID") &&
       message.repaymentId === repayment.repaymentId &&
       message.settlementTxId === repayment.transactions.settlement.transactionId &&
-      message.noteBurnTxId === repayment.transactions.noteBurn.transactionId
+      message.noteBurnTxId === (noteBurnTransaction?.transactionId ?? null)
     );
   });
   repaymentVerification = {
     transactions: {
       authorization: repaymentAuthorization.consensus_timestamp,
       settlement: repaymentSettlement.consensus_timestamp,
-      noteBurn: noteBurn.consensus_timestamp,
-      repaidEvent: repaidEvent.consensus_timestamp
+      ...(noteBurn ? { noteBurn: noteBurn.consensus_timestamp } : {}),
+      completionEvent: completionEvent.consensus_timestamp
     },
     stableRepayment: {
       payer: payerDebit.account,
@@ -237,9 +271,17 @@ if (repayment) {
       returnedToTreasury: repaymentNftTransfer.receiver_account_id,
       deleted: nft.deleted === true
     },
+    collateral:
+      collateralRelease && repayment.version === 2
+        ? {
+            tokenId: repayment.collateral.tokenId,
+            serial: repayment.collateral.serial,
+            releasedTo: collateralRelease.receiver_account_id
+          }
+        : null,
     hcs: {
       authorizationSequenceNumber: String(repaymentAuthorizationMessage.sequence_number),
-      repaidSequenceNumber: String(repaidMessage.sequence_number)
+      completionSequenceNumber: String(completionMessage.sequence_number)
     }
   };
 }

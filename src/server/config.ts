@@ -16,6 +16,7 @@ const schema = z.object({
   DATABASE_SSL: z.enum(["true", "false"]).default("false"),
   COMMITMENT_SECRET: z.string().min(32),
   CONFIRMATION_SECRET: z.string().min(32),
+  SETTLEMENT_AUTH_SECRET: optionalString,
   GRAPH_ENDPOINT: optionalUrl,
   GRAPH_API_KEY: optionalString,
   GRAPH_ASSET_ID: z.literal("AAPL").default("AAPL"),
@@ -93,6 +94,9 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     const missingHedera = hederaRequired.filter((key) => !config[key]);
     if (missingHedera.length > 0) {
       throw new Error(`HEDERA_CONFIG_MISSING:${missingHedera.join(",")}`);
+    }
+    if (!config.SETTLEMENT_AUTH_SECRET || config.SETTLEMENT_AUTH_SECRET.length < 32) {
+      throw new Error("SETTLEMENT_AUTH_SECRET_MISSING");
     }
   }
   if (config.mode === "live") {

@@ -12,8 +12,7 @@ import { UnlockdBondService } from "../src/server/service.js";
 import { MemoryAdvanceStore } from "../src/server/store.js";
 import { requestFixture, testConfig } from "./fixtures.js";
 
-function app() {
-  const config = testConfig();
+function app(config = testConfig()) {
   const service = new UnlockdBondService({
     config,
     store: new MemoryAdvanceStore(),
@@ -26,6 +25,31 @@ function app() {
 }
 
 describe("HTTP API", () => {
+  it("requires operator authorization for non-demo settlement mutations", async () => {
+    const settlementSecret = "settlement-authorization-secret-at-least-thirty-two-characters";
+    const config = {
+      ...testConfig(),
+      APP_MODE: "hedera-demo" as const,
+      mode: "hedera-demo" as const,
+      SETTLEMENT_AUTH_SECRET: settlementSecret
+    };
+    const server = app(config);
+
+    await request(server).post("/api/advances/ub_test/fund").send({}).expect(403, {
+      error: "SETTLEMENT_AUTH_REQUIRED"
+    });
+    await request(server)
+      .post("/api/advances/ub_test/fund")
+      .set("Authorization", "Bearer wrong-secret")
+      .send({})
+      .expect(403, { error: "SETTLEMENT_AUTH_REQUIRED" });
+    await request(server)
+      .post("/api/advances/ub_test/fund")
+      .set("Authorization", `Bearer ${settlementSecret}`)
+      .send({})
+      .expect(422);
+  });
+
   it("serves liveness and readiness without secrets", async () => {
     const health = await request(app()).get("/api/health").expect(200);
     expect(health.body).toEqual({ status: "ok", mode: "demo", service: "unlockd-bond" });

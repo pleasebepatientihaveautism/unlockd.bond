@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   fundingResultV2Schema,
   fundingResultV3Schema,
-  repaymentResultSchema
+  repaymentResultAnySchema
 } from "../src/domain/schemas.js";
 
 const baseUrl = process.env.UNLOCKD_API_URL ?? "http://localhost:3000";
@@ -12,6 +12,8 @@ const operatorId = process.env.HEDERA_OPERATOR_ID;
 if (!operatorId) throw new Error("HEDERA_OPERATOR_ID_REQUIRED");
 const recipientId = process.env.HEDERA_RECIPIENT_ID;
 if (!recipientId) throw new Error("HEDERA_RECIPIENT_ID_REQUIRED");
+const settlementAuthSecret = process.env.SETTLEMENT_AUTH_SECRET;
+if (!settlementAuthSecret) throw new Error("SETTLEMENT_AUTH_SECRET_REQUIRED");
 
 const suffix = crypto.randomUUID().replaceAll("-", "");
 const input = {
@@ -62,7 +64,10 @@ const fundedResponse = await fetch(
   `${baseUrl}/api/advances/${encodeURIComponent(evaluated.advance.advanceId)}/fund`,
   {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${settlementAuthSecret}`,
+      "content-type": "application/json"
+    },
     body: JSON.stringify({ confirmationToken: evaluated.confirmationToken })
   }
 );
@@ -91,6 +96,7 @@ if (process.argv.includes("--repay")) {
     {
       method: "POST",
       headers: {
+        authorization: `Bearer ${settlementAuthSecret}`,
         "content-type": "application/json",
         "idempotency-key": repaymentId
       },
@@ -107,7 +113,7 @@ if (process.argv.includes("--repay")) {
   if (!repaymentResponse.ok || repaymentBody.advance?.state !== "REPAID") {
     throw new Error(repaymentBody.error ?? "DEMO_REPAYMENT_FAILED");
   }
-  repayment = repaymentResultSchema.parse(repaymentBody.advance.repayment);
+  repayment = repaymentResultAnySchema.parse(repaymentBody.advance.repayment);
   if (
     repayment.simulated ||
     !Object.values(repayment.transactions).every(

@@ -155,3 +155,5 @@ design-qa.md
 docs/secfi-dashboard-audit-*/
 docs/SECFI_*.md
 .vercel
+.env*
+!.env.example

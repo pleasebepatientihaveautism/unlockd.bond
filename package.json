@@ -22,6 +22,7 @@
     "dev:hedera": "DOTENV_CONFIG_PATH=.env.hedera.local tsx watch src/server/index.ts",
     "hedera:demo": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/run-hedera-demo.ts",
     "hedera:lifecycle": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/run-hedera-demo.ts --repay",
+    "hedera:recover": "tsx scripts/recover-hedera-receipt.ts",
     "hedera:verify": "tsx scripts/verify-hedera.ts",
     "hedera:retire-orphan": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/retire-orphan-note.ts",
     "coresignal:configure": "tsx scripts/configure-coresignal.ts",
