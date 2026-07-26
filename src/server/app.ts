@@ -109,10 +109,23 @@ export function createApp(deps: AppDependencies) {
     response.json({
       mode: deps.config.mode,
       syntheticOnly: deps.config.mode !== "live",
-      asset: "AAPL",
+      asset: "YAHOO_PRIVATE_COMPANIES",
       network: "Hedera Testnet",
-      fixedCapMinor: deps.config.POLICY_FIXED_CAP_MINOR
+      payoutAsset: {
+        name: "USDC DEMO",
+        symbol: "USDC",
+        decimals: 6,
+        tokenId: deps.config.HEDERA_STABLE_TOKEN_ID ?? null,
+        label: "Demo USDC — no real value"
+      },
+      maxLtvBps: 7_000
     });
+  });
+
+  app.get("/api/market/private-companies", async (_request, response) => {
+    const companies = await deps.service.privateCompanies();
+    response.setHeader("cache-control", "public, max-age=60");
+    response.json({ companies });
   });
 
   app.post("/api/advances/evaluate", async (request, response) => {

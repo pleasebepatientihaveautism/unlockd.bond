@@ -33,10 +33,11 @@ const schema = z.object({
   HEDERA_POOL_ID: optionalString,
   HEDERA_TOPIC_ID: optionalString,
   HEDERA_TOKEN_ID: optionalString,
+  HEDERA_STABLE_TOKEN_ID: optionalString,
+  HEDERA_RECIPIENT_ID: z.string().default("0.0.9750175"),
   HEDERA_MIRROR_URL: z.url().default("https://testnet.mirrornode.hedera.com"),
-  PAYOUT_TINYBAR_PER_USD_MINOR: z.coerce.number().int().positive().default(10_000),
   POLICY_FIXED_CAP_MINOR: z.coerce.number().int().positive().default(200_000),
-  TREASURY_RESERVE_TINYBAR: z.coerce.number().int().positive().default(100_000_000),
+  TREASURY_STABLE_RESERVE_MINOR: z.coerce.number().int().min(0).default(10_000),
   CORESIGNAL_API_KEY: optionalString,
   CORESIGNAL_COLLECT_URL_TEMPLATE: optionalString,
   CORESIGNAL_CACHE_DIR: z.string().min(1).default("cache/companies"),
@@ -80,7 +81,9 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       "HEDERA_SUPPLY_KEY",
       "HEDERA_POOL_ID",
       "HEDERA_TOPIC_ID",
-      "HEDERA_TOKEN_ID"
+      "HEDERA_TOKEN_ID",
+      "HEDERA_STABLE_TOKEN_ID",
+      "HEDERA_RECIPIENT_ID"
     ] as const;
     const missingHedera = hederaRequired.filter((key) => !config[key]);
     if (missingHedera.length > 0) {

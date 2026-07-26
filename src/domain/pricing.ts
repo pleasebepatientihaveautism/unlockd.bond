@@ -5,8 +5,8 @@ export const RISK_MULTIPLIER_BPS = 5_000;
 export const MIN_UPSIDE_SHARE_BPS = 1_000;
 export const MAX_UPSIDE_SHARE_BPS = 6_000;
 export const FALLBACK_UPSIDE_SHARE_BPS = 3_500;
-export const POLICY_BUFFER_BPS = 1_000;
-export const EQUITY_ADVANCE_LTV_BPS = 2_500;
+export const POLICY_BUFFER_BPS = 0;
+export const EQUITY_ADVANCE_LTV_BPS = 7_000;
 
 export type CompanyDataSource = "coresignal" | "fallback_default";
 export type CompanyCacheStatus = "hit" | "miss" | "stale" | "budget_blocked" | "disabled";
@@ -94,6 +94,23 @@ function decimalToMicrounits(value: string): bigint {
   return BigInt(whole) * 1_000_000n + BigInt(decimal.padEnd(6, "0"));
 }
 
+export function calculateEquityLtvCapMinor(
+  request: AdvanceRequest,
+  market: MarketSnapshot
+): number {
+  const units = decimalToMicrounits(request.grant.vestedUnits);
+  const referencePrice = BigInt(market.priceUsdMinor);
+  const strike = BigInt(request.grant.strikePriceMinor);
+  const netValuePerOption =
+    request.grant.grantType === "RSU"
+      ? referencePrice
+      : referencePrice > strike
+        ? referencePrice - strike
+        : 0n;
+  const grossEquityValue = (units * netValuePerOption) / 1_000_000n;
+  return safeMinor((grossEquityValue * BigInt(EQUITY_ADVANCE_LTV_BPS)) / 10_000n);
+}
+
 export function fallbackCompanyFinancialLookup(
   fallbackReason = "COMPANY_DATA_UNAVAILABLE",
   cacheStatus: CompanyCacheStatus = "disabled",
@@ -165,7 +182,7 @@ export function calculateAdvancePricing(
   market: MarketSnapshot,
   risk: RiskDecision,
   companyRisk: CompanyRiskSignal,
-  config: PricingPolicyConfig
+  _config: PricingPolicyConfig
 ): { quote: EquityPricingQuote; authorization: PricingAuthorization } {
   const units = decimalToMicrounits(request.grant.vestedUnits);
   const referencePrice = BigInt(market.priceUsdMinor);
@@ -177,21 +194,18 @@ export function calculateAdvancePricing(
         ? referencePrice - strike
         : 0n;
   const grossEquityValue = (units * netValuePerOption) / 1_000_000n;
-  const totalHaircutBps = Math.min(
-    9_500,
-    risk.volatilityHaircutBps + risk.liquidityHaircutBps + POLICY_BUFFER_BPS
-  );
-  const eligibleEquityValue = (grossEquityValue * BigInt(10_000 - totalHaircutBps)) / 10_000n;
-  const equityBasedLimit = (eligibleEquityValue * BigInt(EQUITY_ADVANCE_LTV_BPS)) / 10_000n;
-  const incomeBasedLimit = BigInt(Math.floor(request.employment.monthlyNetIncomeMinor / 2));
+  // Private-company borrowing is intentionally transparent: Yahoo reference
+  // price × vested shares, with no compensation input or opaque haircut in the cap.
+  const totalHaircutBps = 0;
+  const eligibleEquityValue = grossEquityValue;
+  const equityBasedLimit = BigInt(calculateEquityLtvCapMinor(request, market));
   const requestedAmount = BigInt(request.request.amountMinor);
-  const fixedLimit = BigInt(config.fixedCapMinor);
-  const policyMax = [requestedAmount, incomeBasedLimit, equityBasedLimit, fixedLimit].reduce(
-    (lowest, current) => (current < lowest ? current : lowest)
-  );
+  const policyMax = equityBasedLimit;
   const modelLimit =
     risk.decision === "reject" ? 0n : BigInt(Math.max(0, risk.recommendedAdvanceMinor));
-  const finalCreditLine = modelLimit < policyMax ? modelLimit : policyMax;
+  const finalCreditLine = [requestedAmount, modelLimit, policyMax].reduce((lowest, current) =>
+    current < lowest ? current : lowest
+  );
   const rejected = risk.decision === "reject" || finalCreditLine <= 0n;
 
   const quote: EquityPricingQuote = {
@@ -199,13 +213,13 @@ export function calculateAdvancePricing(
     strikePriceMinor: request.grant.strikePriceMinor,
     netValuePerOptionMinor: safeMinor(netValuePerOption),
     grossEquityValueMinor: safeMinor(grossEquityValue),
-    volatilityHaircutBps: risk.volatilityHaircutBps,
-    liquidityHaircutBps: risk.liquidityHaircutBps,
+    volatilityHaircutBps: 0,
+    liquidityHaircutBps: 0,
     policyBufferBps: POLICY_BUFFER_BPS,
     totalHaircutBps,
     eligibleEquityValueMinor: safeMinor(eligibleEquityValue),
     equityBasedCreditLimitMinor: safeMinor(equityBasedLimit),
-    fixedCreditLimitMinor: config.fixedCapMinor,
+    fixedCreditLimitMinor: safeMinor(equityBasedLimit),
     finalCreditLineMinor: rejected ? 0 : safeMinor(finalCreditLine),
     poolUpsideShareBps: companyRisk.poolUpsideShareBps,
     preferredOverhangRatioBps: companyRisk.preferredOverhangRatioBps,

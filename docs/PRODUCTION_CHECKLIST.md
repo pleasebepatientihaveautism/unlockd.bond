@@ -27,7 +27,7 @@
 - [ ] Graph endpoint returns live AAPL evidence and healthy `_meta`
 - [ ] stale, paused, indexing-error, and insufficient-sample cases fail closed
 - [ ] Hedera topic, token, treasury, pool association, and balances are valid
-- [ ] one atomic test HBAR + NFT transfer reaches consensus `SUCCESS`
+- [ ] one atomic Demo USDC + NFT transfer reaches consensus `SUCCESS`
 - [ ] Mirror Node shows the payment, NFT owner, and HCS messages
 
 ## Runtime
@@ -40,7 +40,7 @@
 - [ ] database backups and restore test exist
 - [ ] alerts cover 5xx rate, funding failures, dependency readiness, and low
       treasury balance without capturing payloads
-- [ ] `PAYOUT_TINYBAR_PER_USD_MINOR` is visibly documented as testnet-only
+- [ ] `USDC DEMO` is visibly labeled as a custom unbacked Testnet token
 
 ## Evidence and honesty
 

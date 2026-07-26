@@ -4,13 +4,7 @@ import { loadConfig } from "../src/server/config.js";
 export const requestFixture = (overrides: Partial<AdvanceRequest> = {}): AdvanceRequest => ({
   requestId: "ub_req_1234567890abcdef",
   employeeRef: "ub_emp_1234567890abcdef",
-  recipientAccountId: "0.0.653284",
   synthetic: true,
-  employment: {
-    tenureMonths: 38,
-    monthlyNetIncomeMinor: 650_000,
-    statusVerified: true
-  },
   grant: {
     assetSymbol: "AAPL",
     companyIdentifier: "apple.com",
@@ -62,8 +56,8 @@ export const marketFixture = (overrides: Partial<MarketSnapshot> = {}): MarketSn
 export const privateRequestFixture = (overrides: Partial<AdvanceRequest> = {}): AdvanceRequest =>
   requestFixture({
     grant: {
-      assetSymbol: "WHOOP",
-      companyIdentifier: "whoop.com",
+      assetSymbol: "WHOO.PVT",
+      companyIdentifier: "WHOO.PVT",
       grantType: "OPTION",
       vestedUnits: "20000.000000",
       strikePriceMinor: 120,
@@ -83,7 +77,7 @@ export const privateMarketFixture = (overrides: Partial<MarketSnapshot> = {}): M
     source: "issuer-valuation",
     network: "private-company",
     chainId: 0,
-    assetSymbol: "WHOOP",
+    assetSymbol: "WHOO.PVT",
     tokenAddress: null,
     feedAddress: null,
     priceUsdMinor: 480,

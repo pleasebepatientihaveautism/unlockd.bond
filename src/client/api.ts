@@ -1,5 +1,5 @@
 import type { CustomerAdvance } from "../domain/public";
-import type { AdvanceRequest } from "../domain/schemas";
+import type { AdvanceRequest, PrivateCompanyListing } from "../domain/schemas";
 
 interface EvaluationResponse {
   advance: CustomerAdvance;
@@ -31,6 +31,13 @@ export function evaluateAdvance(input: AdvanceRequest): Promise<EvaluationRespon
     headers: { "Idempotency-Key": input.requestId },
     body: JSON.stringify(input)
   });
+}
+
+export async function getPrivateCompanies(): Promise<PrivateCompanyListing[]> {
+  const response = await request<{ companies: PrivateCompanyListing[] }>(
+    "/api/market/private-companies"
+  );
+  return response.companies;
 }
 
 export function fundAdvance(

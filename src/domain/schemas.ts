@@ -4,21 +4,16 @@ const decimalUnits = z
   .string()
   .regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,6})?$/, "Use up to 6 decimal places");
 
-const positiveMinor = z.number().int().positive().max(100_000_000);
-const hederaAccount = z.string().regex(/^0\.0\.\d{3,12}$/);
-export const assetSymbolSchema = z.enum(["AAPL", "WHOOP"]);
+const positiveMinor = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+export const assetSymbolSchema = z
+  .string()
+  .regex(/^(?:AAPL|[A-Z0-9]{2,12}\.PVT)$/, "Use AAPL or a Yahoo private-company ticker");
 
 export const advanceRequestSchema = z
   .object({
     requestId: z.string().regex(/^ub_req_[a-zA-Z0-9_-]{8,80}$/),
     employeeRef: z.string().regex(/^ub_emp_[a-zA-Z0-9_-]{8,80}$/),
-    recipientAccountId: hederaAccount,
     synthetic: z.boolean(),
-    employment: z.object({
-      tenureMonths: z.number().int().min(1).max(600),
-      monthlyNetIncomeMinor: positiveMinor,
-      statusVerified: z.boolean()
-    }),
     grant: z.object({
       assetSymbol: assetSymbolSchema,
       companyIdentifier: z
@@ -114,7 +109,7 @@ export const marketSnapshotSchema = z
     }
     if (
       value.evidenceType === "PRIVATE_VALUATION" &&
-      (value.assetSymbol !== "WHOOP" ||
+      (!value.assetSymbol.endsWith(".PVT") ||
         value.chainId !== 0 ||
         value.tokenAddress !== null ||
         value.feedAddress !== null)
@@ -122,17 +117,33 @@ export const marketSnapshotSchema = z
       context.addIssue({
         code: "custom",
         path: ["evidenceType"],
-        message: "Private valuation evidence requires WHOOP without public token addresses"
+        message: "Private valuation evidence requires a Yahoo .PVT ticker without token addresses"
       });
     }
   });
+
+export const privateCompanyListingSchema = z
+  .object({
+    ticker: z.string().regex(/^[A-Z0-9]{2,12}\.PVT$/),
+    companyName: z.string().min(1).max(160),
+    priceUsdMinor: positiveMinor,
+    estimatedValuationUsdMinor: z.number().int().positive().nullable(),
+    latestFundingDate: z.iso.date().nullable(),
+    latestShareClass: z.string().min(1).max(160).nullable(),
+    sector: z.string().min(1).max(160).nullable(),
+    priceUpdatedAt: z.number().int().positive(),
+    source: z.literal("yahoo-finance-private"),
+    evidenceUrl: z.url(),
+    cacheStatus: z.enum(["hit", "miss", "stale"])
+  })
+  .strict();
 
 export const riskDecisionSchema = z
   .object({
     schemaVersion: z.literal("unlockd-bond-risk-v1"),
     decision: z.enum(["approve", "counter", "reject"]),
     riskBand: z.enum(["LOW", "MEDIUM", "HIGH"]),
-    recommendedAdvanceMinor: z.number().int().min(0).max(100_000_000),
+    recommendedAdvanceMinor: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     volatilityHaircutBps: z.number().int().min(0).max(10_000),
     liquidityHaircutBps: z.number().int().min(0).max(10_000),
     reasonCodes: z
@@ -155,7 +166,7 @@ export const riskReceiptSchema = z
   })
   .strict();
 
-export const fundingResultSchema = z
+const fundingResultV1Schema = z
   .object({
     paymentTxId: z.string().min(3).max(200),
     noteTokenId: z.string().min(3).max(80),
@@ -173,12 +184,90 @@ export const fundingResultSchema = z
   })
   .strict();
 
+export const fundingTransactionSchema = z
+  .object({
+    transactionId: z.string().min(3).max(200),
+    consensusTimestamp: z.string().min(3).max(80),
+    consensusStatus: z.enum(["SUCCESS", "SIMULATED"]),
+    mirrorUrl: z.string().url(),
+    hashscanUrl: z.string().url()
+  })
+  .strict();
+
+export const fundingProgressSchema = z
+  .object({
+    version: z.literal(2),
+    stage: z.enum(["AUTHORIZED", "NOTE_MINTED", "SETTLED", "FUNDED"]),
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema.optional(),
+        noteMint: fundingTransactionSchema.optional(),
+        settlement: fundingTransactionSchema.optional(),
+        fundedEvent: fundingTransactionSchema.optional()
+      })
+      .strict(),
+    noteSerial: z.string().regex(/^\d+$/).optional(),
+    authorizationSequenceNumber: z.string().regex(/^\d+$/).optional(),
+    fundedSequenceNumber: z.string().regex(/^\d+$/).optional()
+  })
+  .strict();
+
+export const fundingResultV2Schema = z
+  .object({
+    version: z.literal(2),
+    asset: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        name: z.literal("USDC DEMO"),
+        symbol: z.literal("USDC"),
+        decimals: z.literal(6),
+        amountUnits: z.string().regex(/^[1-9]\d*$/),
+        amountMinor: positiveMinor,
+        label: z.literal("Demo USDC — no real value"),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    note: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        serial: z.string().regex(/^\d+$/),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    topic: z
+      .object({
+        topicId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        authorizationSequenceNumber: z.string().regex(/^\d+$/),
+        fundedSequenceNumber: z.string().regex(/^\d+$/),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema,
+        noteMint: fundingTransactionSchema,
+        settlement: fundingTransactionSchema,
+        fundedEvent: fundingTransactionSchema
+      })
+      .strict(),
+    simulated: z.boolean()
+  })
+  .strict();
+
+export const fundingResultSchema = z.union([fundingResultV2Schema, fundingResultV1Schema]);
+
 export type AdvanceRequest = z.infer<typeof advanceRequestSchema>;
 export type AssetSymbol = z.infer<typeof assetSymbolSchema>;
 export type MarketSnapshot = z.infer<typeof marketSnapshotSchema>;
 export type RiskDecision = z.infer<typeof riskDecisionSchema>;
 export type RiskReceipt = z.infer<typeof riskReceiptSchema>;
 export type FundingResult = z.infer<typeof fundingResultSchema>;
+export type FundingResultV2 = z.infer<typeof fundingResultV2Schema>;
+export type FundingProgress = z.infer<typeof fundingProgressSchema>;
+export type FundingTransaction = z.infer<typeof fundingTransactionSchema>;
+export type PrivateCompanyListing = z.infer<typeof privateCompanyListingSchema>;
 
 export const confirmationSchema = z
   .object({

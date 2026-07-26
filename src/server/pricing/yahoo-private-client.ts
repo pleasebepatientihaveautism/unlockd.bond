@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { yahooPrivateSeed } from "./yahoo-private-seed.js";
 
 export const YAHOO_PRIVATE_COMPANIES_URL =
   "https://finance.yahoo.com/markets/private-companies/highest-valuation/";
@@ -34,9 +35,14 @@ export interface YahooPrivateCompanyQuote {
   cacheStatus: "hit" | "miss" | "stale";
 }
 
-interface CachedQuote {
+interface LegacyCachedQuote {
   version: 1;
   quote: Omit<YahooPrivateCompanyQuote, "cacheStatus">;
+}
+
+interface CachedCatalogue {
+  version: 2;
+  companies: Array<Omit<YahooPrivateCompanyQuote, "cacheStatus">>;
 }
 
 interface YahooPrivateClientConfig {
@@ -116,6 +122,22 @@ export function parseYahooPrivateCompaniesResponse(
   return quoteFromRecords(recordsFromBody(body), ticker.trim().toUpperCase(), fetchedAt, sourceUrl);
 }
 
+export function parseYahooPrivateCompanyCatalogueResponse(
+  body: unknown,
+  fetchedAt = Math.floor(Date.now() / 1000),
+  sourceUrl = YAHOO_PRIVATE_COMPANIES_URL
+): Array<Omit<YahooPrivateCompanyQuote, "cacheStatus">> {
+  return recordsFromBody(body).flatMap((record) => {
+    const ticker = optionalText(record.ticker)?.toUpperCase();
+    if (!ticker?.endsWith(".PVT")) return [];
+    try {
+      return [quoteFromRecords([record], ticker, fetchedAt, sourceUrl)];
+    } catch {
+      return [];
+    }
+  });
+}
+
 function quoteFromRecords(
   records: RawPrivateCompany[],
   normalizedTicker: string,
@@ -158,7 +180,7 @@ export class YahooPrivateCompanyClient {
   private readonly dataUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
-  private inFlight: Promise<YahooPrivateCompanyQuote> | null = null;
+  private inFlight: Promise<YahooPrivateCompanyQuote[]> | null = null;
 
   constructor(private readonly config: YahooPrivateClientConfig) {
     this.pageUrl = config.pageUrl ?? YAHOO_PRIVATE_COMPANIES_URL;
@@ -168,41 +190,58 @@ export class YahooPrivateCompanyClient {
   }
 
   async quote(ticker: string): Promise<YahooPrivateCompanyQuote> {
+    const normalizedTicker = ticker.trim().toUpperCase();
+    const quote = (await this.list()).find((company) => company.ticker === normalizedTicker);
+    if (!quote) throw new Error("YAHOO_PRIVATE_COMPANY_NOT_FOUND");
+    return quote;
+  }
+
+  async list(): Promise<YahooPrivateCompanyQuote[]> {
     if (this.inFlight) return this.inFlight;
-    this.inFlight = this.load(ticker).finally(() => {
+    this.inFlight = this.load().finally(() => {
       this.inFlight = null;
     });
     return this.inFlight;
   }
 
-  private async readCache(): Promise<CachedQuote | null> {
+  private async readCache(): Promise<CachedCatalogue | LegacyCachedQuote | null> {
     try {
-      const parsed = JSON.parse(await readFile(this.config.cacheFile, "utf8")) as CachedQuote;
-      return parsed.version === 1 && parsed.quote ? parsed : null;
+      const parsed = JSON.parse(await readFile(this.config.cacheFile, "utf8")) as
+        | CachedCatalogue
+        | LegacyCachedQuote;
+      if (parsed.version === 2 && Array.isArray(parsed.companies)) return parsed;
+      if (parsed.version === 1 && parsed.quote) return parsed;
+      return null;
     } catch {
       return null;
     }
   }
 
-  private async writeCache(quote: Omit<YahooPrivateCompanyQuote, "cacheStatus">): Promise<void> {
+  private async writeCache(
+    companies: Array<Omit<YahooPrivateCompanyQuote, "cacheStatus">>
+  ): Promise<void> {
     await mkdir(path.dirname(this.config.cacheFile), { recursive: true });
     const temporaryPath = `${this.config.cacheFile}.tmp`;
     await writeFile(
       temporaryPath,
-      `${JSON.stringify({ version: 1, quote } satisfies CachedQuote, null, 2)}\n`,
+      `${JSON.stringify({ version: 2, companies } satisfies CachedCatalogue, null, 2)}\n`,
       { encoding: "utf8", mode: 0o600 }
     );
     await rename(temporaryPath, this.config.cacheFile);
   }
 
-  private async load(ticker: string): Promise<YahooPrivateCompanyQuote> {
+  private async load(): Promise<YahooPrivateCompanyQuote[]> {
     const cached = await this.readCache();
     const now = Math.floor(Date.now() / 1000);
+    const cachedCompanies =
+      cached?.version === 2 ? cached.companies : cached?.version === 1 ? [cached.quote] : [];
+    const newestCachedAt = Math.max(0, ...cachedCompanies.map((company) => company.fetchedAt));
     if (
-      cached?.quote.ticker === ticker.trim().toUpperCase() &&
-      now - cached.quote.fetchedAt <= this.config.cacheTtlSeconds
+      cached?.version === 2 &&
+      cachedCompanies.length > 0 &&
+      now - newestCachedAt <= this.config.cacheTtlSeconds
     ) {
-      return { ...cached.quote, cacheStatus: "hit" };
+      return cachedCompanies.map((company) => ({ ...company, cacheStatus: "hit" }));
     }
 
     try {
@@ -215,22 +254,22 @@ export class YahooPrivateCompanyClient {
       if (!response.ok) throw new Error(`YAHOO_PRIVATE_HTTP_${response.status}`);
       const observedAt = Date.parse(response.headers.get("date") ?? "");
       const fetchedAt = Number.isFinite(observedAt) ? Math.floor(observedAt / 1000) : now;
-      const quote = parseYahooPrivateCompaniesResponse(
+      const companies = parseYahooPrivateCompanyCatalogueResponse(
         (await response.json()) as unknown,
-        ticker,
         fetchedAt,
         this.pageUrl
       );
-      await this.writeCache(quote);
-      return { ...quote, cacheStatus: "miss" };
-    } catch (error) {
-      if (
-        cached?.quote.ticker === ticker.trim().toUpperCase() &&
-        now - cached.quote.fetchedAt <= 7 * 24 * 60 * 60
-      ) {
-        return { ...cached.quote, cacheStatus: "stale" };
+      if (companies.length === 0) throw new Error("YAHOO_PRIVATE_CATALOGUE_EMPTY");
+      await this.writeCache(companies);
+      return companies.map((company) => ({ ...company, cacheStatus: "miss" }));
+    } catch {
+      const merged = new Map(yahooPrivateSeed().map((company) => [company.ticker, company]));
+      for (const company of cachedCompanies) {
+        if (now - company.fetchedAt <= 365 * 24 * 60 * 60) {
+          merged.set(company.ticker, { ...company, cacheStatus: "stale" });
+        }
       }
-      throw error;
+      return [...merged.values()].map((company) => ({ ...company, cacheStatus: "stale" }));
     }
   }
 }

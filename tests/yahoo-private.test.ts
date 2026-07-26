@@ -7,6 +7,7 @@ import { YahooPrivateMarketProvider } from "../src/server/adapters/yahoo-private
 import {
   parseYahooPrivateCompaniesPage,
   parseYahooPrivateCompaniesResponse,
+  parseYahooPrivateCompanyCatalogueResponse,
   YahooPrivateCompanyClient
 } from "../src/server/pricing/yahoo-private-client.js";
 
@@ -52,6 +53,21 @@ describe("Yahoo Finance private-company parser", () => {
     });
   });
 
+  it("builds a selectable catalogue from every valid Yahoo private-company row", () => {
+    const openAiRecord = {
+      ...whoopRecord,
+      ticker: "OPAI.PVT",
+      companyName: "OpenAI",
+      regularMarketPrice: { raw: 721.85, fmt: "721.85" }
+    };
+    const companies = parseYahooPrivateCompanyCatalogueResponse(
+      { finance: { result: [{ records: [openAiRecord, whoopRecord] }] } },
+      1_785_026_800
+    );
+    expect(companies).toHaveLength(2);
+    expect(companies.map((company) => company.ticker)).toEqual(["OPAI.PVT", "WHOO.PVT"]);
+  });
+
   it("caches the page and maps WHOOP price into market evidence", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "unlockd-yahoo-"));
     const fetchImpl = vi.fn(
@@ -60,7 +76,7 @@ describe("Yahoo Finance private-company parser", () => {
           status: 200,
           headers: {
             "content-type": "application/json",
-            date: "Sun, 26 Jul 2026 00:46:40 GMT"
+            date: new Date().toUTCString()
           }
         })
     );
@@ -71,8 +87,8 @@ describe("Yahoo Finance private-company parser", () => {
     });
     const provider = new YahooPrivateMarketProvider(new DemoMarketProvider(), client);
 
-    const first = await provider.snapshot("WHOOP");
-    const cached = await provider.snapshot("WHOOP");
+    const first = await provider.snapshot("WHOO.PVT");
+    const cached = await provider.snapshot("WHOO.PVT");
 
     expect(first).toMatchObject({
       source: "yahoo-finance-private",

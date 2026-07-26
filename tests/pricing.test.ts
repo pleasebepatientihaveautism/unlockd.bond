@@ -49,9 +49,9 @@ describe("equity pricing", () => {
       strikePriceMinor: 120,
       netValuePerOptionMinor: 360,
       grossEquityValueMinor: 7_200_000,
-      totalHaircutBps: 7000,
-      eligibleEquityValueMinor: 2_160_000,
-      equityBasedCreditLimitMinor: 540_000,
+      totalHaircutBps: 0,
+      eligibleEquityValueMinor: 7_200_000,
+      equityBasedCreditLimitMinor: 5_040_000,
       preferredOverhangRatioBps: 3000,
       poolUpsideShareBps: 3000,
       finalCreditLineMinor: 150_000

@@ -10,7 +10,7 @@ flowchart LR
   POLICY --> STORE["PostgreSQL state and idempotency"]
   STORE --> HEDERA["Hedera bounded signer"]
   HEDERA --> HCS["HCS commitments"]
-  HEDERA --> HTS["HTS note plus HBAR transfer"]
+  HEDERA --> HTS["HTS note plus Demo USDC transfer"]
   HCS --> PROOF["Privacy-safe proof receipt"]
   HTS --> PROOF
   PROOF --> UI

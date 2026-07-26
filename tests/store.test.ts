@@ -25,6 +25,7 @@ const record = {
   riskReceipt: {},
   authorization: { amountMinor: 1000 },
   funding: null,
+  fundingProgress: null,
   failureCode: null
 } as unknown as AdvanceRecord;
 

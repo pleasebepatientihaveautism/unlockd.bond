@@ -15,13 +15,8 @@ import {
   YahooPrivateCompanyClient
 } from "../src/server/pricing/yahoo-private-client.js";
 
-const [
-  companyIdentifier = "whoop.com",
-  units = "20000",
-  strike = "1.20",
-  share = "4.80",
-  amount = "1500"
-] = process.argv.slice(2);
+const [companyIdentifier = "whoop.com", units = "20000", share = "4.80", amount = "1500"] =
+  process.argv.slice(2);
 
 const toMinor = (value: string): number => {
   const parsed = Number(value);
@@ -52,19 +47,13 @@ const valuationDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOStrin
 const request: AdvanceRequest = {
   requestId: "ub_req_pricing_check_2026",
   employeeRef: "ub_emp_pricing_check_2026",
-  recipientAccountId: "0.0.653284",
   synthetic: true,
-  employment: {
-    tenureMonths: 38,
-    monthlyNetIncomeMinor: 650_000,
-    statusVerified: true
-  },
   grant: {
-    assetSymbol: "WHOOP",
+    assetSymbol: "WHOO.PVT",
     companyIdentifier,
-    grantType: "OPTION",
+    grantType: "RSU",
     vestedUnits: units,
-    strikePriceMinor: toMinor(strike),
+    strikePriceMinor: 0,
     referenceSharePriceMinor: toMinor(share),
     valuationDate,
     valuationSource: "EMPLOYEE_409A",
@@ -90,7 +79,7 @@ const marketProvider = new YahooPrivateMarketProvider(
     timeoutMs: Number(process.env.YAHOO_PRIVATE_TIMEOUT_MS ?? 8_000)
   })
 );
-const market = await marketProvider.snapshot("WHOOP", request.grant);
+const market = await marketProvider.snapshot("WHOO.PVT", request.grant);
 const riskProvider = new DemoRiskProvider();
 const { decision: risk } = await riskProvider.evaluate(
   request,

@@ -1,22 +1,19 @@
+import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { fundingResultSchema } from "../src/domain/schemas.js";
+import { fundingResultV2Schema } from "../src/domain/schemas.js";
 
 const baseUrl = process.env.UNLOCKD_API_URL ?? "http://localhost:3000";
 const operatorId = process.env.HEDERA_OPERATOR_ID;
 if (!operatorId) throw new Error("HEDERA_OPERATOR_ID_REQUIRED");
+const recipientId = process.env.HEDERA_RECIPIENT_ID;
+if (!recipientId) throw new Error("HEDERA_RECIPIENT_ID_REQUIRED");
 
 const suffix = crypto.randomUUID().replaceAll("-", "");
 const input = {
   requestId: `ub_req_${suffix}`,
   employeeRef: `ub_emp_${crypto.randomUUID().replaceAll("-", "")}`,
-  recipientAccountId: operatorId,
   synthetic: true,
-  employment: {
-    tenureMonths: 38,
-    monthlyNetIncomeMinor: 650_000,
-    statusVerified: true
-  },
   grant: {
     assetSymbol: "AAPL",
     companyIdentifier: "apple.com",
@@ -72,16 +69,22 @@ const funded = (await fundedResponse.json()) as {
 if (!fundedResponse.ok || funded.advance?.state !== "FUNDED") {
   throw new Error(funded.error ?? "DEMO_FUNDING_FAILED");
 }
-const funding = fundingResultSchema.parse(funded.advance.funding);
-if (funding.simulated || funding.consensusStatus !== "SUCCESS") {
+const funding = fundingResultV2Schema.parse(funded.advance.funding);
+if (
+  funding.simulated ||
+  !Object.values(funding.transactions).every(
+    (transaction) => transaction.consensusStatus === "SUCCESS"
+  )
+) {
   throw new Error("REAL_CONSENSUS_RECEIPT_REQUIRED");
 }
 
 const receipt = {
   network: "testnet",
   advanceId: evaluated.advance.advanceId,
-  recipientAccountId: operatorId,
-  amountTinybar: "1000000",
+  recipientAccountId: recipientId,
+  amountMinor: funding.asset.amountMinor,
+  amountStableUnits: funding.asset.amountUnits,
   funding,
   generatedAt: new Date().toISOString()
 };

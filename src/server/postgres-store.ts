@@ -76,7 +76,12 @@ export class PostgresAdvanceStore implements AdvanceStore {
       if (row.record.state !== "AUTHORIZED") {
         throw new StoreError("ADVANCE_NOT_FUNDABLE");
       }
-      const record = { ...row.record, state: "FUNDING" as const, failureCode: null };
+      const record = {
+        ...row.record,
+        state: "FUNDING" as const,
+        fundingProgress: null,
+        failureCode: null
+      };
       await this.write(client, record);
       await client.query("COMMIT");
       return { record, acquired: true };
@@ -96,8 +101,19 @@ export class PostgresAdvanceStore implements AdvanceStore {
       ...record,
       state: "FUNDED",
       funding,
+      fundingProgress: null,
       failureCode: null
     }));
+  }
+
+  async recordFundingProgress(
+    advanceId: string,
+    progress: NonNullable<AdvanceRecord["fundingProgress"]>
+  ): Promise<AdvanceRecord> {
+    return this.update(advanceId, (record) => {
+      if (record.state !== "FUNDING") throw new StoreError("FUNDING_PROGRESS_NOT_ALLOWED");
+      return { ...record, fundingProgress: progress };
+    });
   }
 
   async failFunding(advanceId: string, failureCode: string): Promise<AdvanceRecord> {

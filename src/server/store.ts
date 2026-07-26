@@ -12,6 +12,10 @@ export interface AdvanceStore {
     advanceId: string,
     funding: NonNullable<AdvanceRecord["funding"]>
   ): Promise<AdvanceRecord>;
+  recordFundingProgress(
+    advanceId: string,
+    progress: NonNullable<AdvanceRecord["fundingProgress"]>
+  ): Promise<AdvanceRecord>;
   failFunding(advanceId: string, failureCode: string): Promise<AdvanceRecord>;
   ping(): Promise<boolean>;
 }
@@ -49,6 +53,7 @@ export class MemoryAdvanceStore implements AdvanceStore {
       throw new StoreError("ADVANCE_NOT_FUNDABLE");
     }
     record.state = "FUNDING";
+    record.fundingProgress = null;
     record.failureCode = null;
     return { record: structuredClone(record), acquired: true };
   }
@@ -57,7 +62,18 @@ export class MemoryAdvanceStore implements AdvanceStore {
     advanceId: string,
     funding: NonNullable<AdvanceRecord["funding"]>
   ): Promise<AdvanceRecord> {
-    return this.update(advanceId, "FUNDED", funding, null);
+    return this.update(advanceId, "FUNDED", funding, null, null);
+  }
+
+  async recordFundingProgress(
+    advanceId: string,
+    progress: NonNullable<AdvanceRecord["fundingProgress"]>
+  ): Promise<AdvanceRecord> {
+    const record = this.records.get(advanceId);
+    if (!record) throw new StoreError("ADVANCE_NOT_FOUND");
+    if (record.state !== "FUNDING") throw new StoreError("FUNDING_PROGRESS_NOT_ALLOWED");
+    record.fundingProgress = structuredClone(progress);
+    return structuredClone(record);
   }
 
   async failFunding(advanceId: string, failureCode: string): Promise<AdvanceRecord> {
@@ -72,12 +88,14 @@ export class MemoryAdvanceStore implements AdvanceStore {
     advanceId: string,
     state: AdvanceState,
     funding: AdvanceRecord["funding"],
-    failureCode: string | null
+    failureCode: string | null,
+    fundingProgress: AdvanceRecord["fundingProgress"] | undefined = undefined
   ): Promise<AdvanceRecord> {
     const record = this.records.get(advanceId);
     if (!record) throw new StoreError("ADVANCE_NOT_FOUND");
     record.state = state;
     record.funding = funding;
+    if (fundingProgress !== undefined) record.fundingProgress = fundingProgress;
     record.failureCode = failureCode;
     return structuredClone(record);
   }

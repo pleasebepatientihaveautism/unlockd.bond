@@ -26,8 +26,8 @@ assignment, payroll service, or security.
 - explicit 0G `private` trust mode and `verify_tee: true`;
 - Graph `_meta` provenance, freshness, oracle-health, and sample checks;
 - idempotent `AUTHORIZED → FUNDING → FUNDED | FUNDING_FAILED` state transitions;
-- Hedera Testnet HCS authorization, HTS NFT mint, atomic HBAR + NFT transfer,
-  consensus receipt, and final HCS event;
+- Hedera Testnet HCS authorization, HTS NFT mint, atomic Demo USDC + NFT transfer,
+  complete consensus transaction bundle, and final HCS event;
 - PostgreSQL persistence with row locks and a memory store for tests/demo;
 - one-time scoped funding confirmation tokens;
 - 32 KB request limit, rate limiting, CSP/security headers, origin checks, and
@@ -179,7 +179,10 @@ the derived public key against Mirror Node before spending, and never stores the
 mnemonic. Runtime material is written atomically to ignored
 `.env.hedera.local` with file mode `0600`; public IDs and links are written to
 `hedera-testnet-evidence.json`. The bootstrap is resumable after a partial
-network failure.
+network failure. It also creates a fixed-supply HTS token named `USDC DEMO`
+with symbol `USDC`, six decimals, and an initial/maximum supply of
+1,000,000,000 tokens. This is a custom unbacked Testnet token, not Circle USDC
+and not redeemable for dollars.
 
 For an honest hackathon flow with synthetic market/risk evaluation but real
 Hedera settlement:
@@ -190,10 +193,10 @@ npm run hedera:demo
 npm run hedera:verify
 ```
 
-`hedera:demo` executes a $10-presentation-value advance to the operator account.
-`hedera:verify` independently checks the payment `SUCCESS`, NFT owner, and exact
-`ADVANCE_FUNDED` HCS message through Mirror Node. The public result is saved in
-`hedera-demo-receipt.json`.
+`hedera:demo` executes a 10 Demo USDC advance to the configured recipient.
+`hedera:verify` independently checks all four transactions, the exact stable
+token transfer, NFT owner, and both HCS messages through Mirror Node. The public
+result is saved in `hedera-demo-receipt.json`.
 
 `HEDERA_POOL_KEY` is used only by provisioning for token association and is not
 read by the application runtime.
@@ -201,15 +204,15 @@ read by the application runtime.
 The live funding adapter:
 
 1. verifies TEE status;
-2. verifies the treasury fee reserve;
+2. verifies the Demo USDC treasury reserve and recipient association;
 3. commits `ADVANCE_AUTHORIZED` to HCS;
 4. mints one Advance Note NFT;
-5. atomically transfers test HBAR to the employee and the NFT to the pool;
+5. atomically transfers Demo USDC to the recipient and the NFT to the pool;
 6. requires a Hedera consensus `SUCCESS` receipt;
 7. commits `ADVANCE_FUNDED` to HCS.
 
-`PAYOUT_TINYBAR_PER_USD_MINOR` is an explicit **testnet-only presentation
-conversion**, not an exchange rate or price oracle.
+One USD cent maps exactly to 10,000 six-decimal Demo USDC base units. The
+application never treats the demo token as Circle-issued or as real money.
 
 ## API
 

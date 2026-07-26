@@ -5,10 +5,17 @@ import {
   type FundingResult,
   type MarketSnapshot,
   marketSnapshotSchema,
+  type PrivateCompanyListing,
   type RiskDecision,
   type RiskReceipt
 } from "../../domain/schemas.js";
-import type { FundingPacket, MarketProvider, PaymentProvider, RiskProvider } from "./types.js";
+import type {
+  FundingPacket,
+  FundingProgressRecorder,
+  MarketProvider,
+  PaymentProvider,
+  RiskProvider
+} from "./types.js";
 
 const AAPL_TOKEN = "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9";
 const AAPL_FEED = "0x6B22A786bAa607d76728168703a39Ea9C99f2cD0";
@@ -18,12 +25,31 @@ function digest(value: string): string {
 }
 
 export class DemoMarketProvider implements MarketProvider {
+  async listPrivateCompanies(): Promise<PrivateCompanyListing[]> {
+    const now = Math.floor(Date.now() / 1000);
+    return [
+      {
+        ticker: "WHOO.PVT",
+        companyName: "WHOOP",
+        priceUsdMinor: 480,
+        estimatedValuationUsdMinor: 3_600_000_000_00,
+        latestFundingDate: null,
+        latestShareClass: "Demo",
+        sector: "Consumer Goods",
+        priceUpdatedAt: now,
+        source: "yahoo-finance-private",
+        evidenceUrl: "https://finance.yahoo.com/markets/private-companies/highest-valuation/",
+        cacheStatus: "stale"
+      }
+    ];
+  }
+
   async snapshot(
     assetSymbol: AssetSymbol,
     grant?: AdvanceRequest["grant"]
   ): Promise<MarketSnapshot> {
     const now = Math.floor(Date.now() / 1000);
-    if (assetSymbol === "WHOOP") {
+    if (assetSymbol.endsWith(".PVT")) {
       const valuationTimestamp = grant?.valuationDate
         ? Math.floor(Date.parse(`${grant.valuationDate}T00:00:00Z`) / 1000)
         : now - 30 * 24 * 60 * 60;
@@ -32,7 +58,7 @@ export class DemoMarketProvider implements MarketProvider {
         source: "issuer-valuation",
         network: "private-company",
         chainId: 0,
-        assetSymbol: "WHOOP",
+        assetSymbol,
         tokenAddress: null,
         feedAddress: null,
         priceUsdMinor: grant?.referenceSharePriceMinor ?? 480,
@@ -47,7 +73,7 @@ export class DemoMarketProvider implements MarketProvider {
         indexedBlockTimestamp: valuationTimestamp,
         hasIndexingErrors: false,
         valuationBasis: "Synthetic 409A common-share FMV",
-        externalEvidenceLabel: "WHOOP Series G company valuation context",
+        externalEvidenceLabel: `${assetSymbol} synthetic private-company valuation`,
         simulated: true
       });
     }
@@ -92,11 +118,7 @@ export class DemoRiskProvider implements RiskProvider {
     const volatilityHaircutBps = privateCompany
       ? 0
       : Math.min(2500, Math.floor((market.realizedVolatilityBps ?? 0) / 3));
-    const recommendedAdvanceMinor = Math.min(
-      request.request.amountMinor,
-      policyMaxMinor,
-      Math.floor(request.employment.monthlyNetIncomeMinor * 0.45)
-    );
+    const recommendedAdvanceMinor = Math.min(request.request.amountMinor, policyMaxMinor);
     return {
       decision: {
         schemaVersion: "unlockd-bond-risk-v1",
@@ -104,16 +126,15 @@ export class DemoRiskProvider implements RiskProvider {
         riskBand: volatilityHaircutBps > 1300 ? "MEDIUM" : "LOW",
         recommendedAdvanceMinor,
         volatilityHaircutBps,
-        liquidityHaircutBps: privateCompany ? 6000 : market.transferCount24h < 20 ? 1400 : 700,
+        liquidityHaircutBps: privateCompany ? 0 : market.transferCount24h < 20 ? 1400 : 700,
         reasonCodes: [
           "SYNTHETIC_PROFILE",
-          "TENURE_STABLE",
           "VESTED_VALUE_SUFFICIENT",
-          privateCompany ? "PRIVATE_COMPANY_ILLIQUID" : "MARKET_VOLATILITY_ELEVATED"
+          privateCompany ? "EQUITY_LTV_70_PERCENT" : "MARKET_VOLATILITY_ELEVATED"
         ],
         assumptions: [
           privateCompany
-            ? "Synthetic 409A common-share FMV with a 60% private-company illiquidity haircut"
+            ? "70% LTV applied to vested shares at the Yahoo private-company reference price"
             : "Synthetic hackathon evaluation; not a lending decision"
         ]
       },
@@ -135,21 +156,61 @@ export class DemoRiskProvider implements RiskProvider {
 }
 
 export class DemoPaymentProvider implements PaymentProvider {
-  async fund(packet: FundingPacket): Promise<FundingResult> {
-    const tx = `0.0.653284@${Math.floor(Date.now() / 1000)}.${digest(packet.advanceId).slice(0, 9)}`;
-    return {
-      paymentTxId: tx,
-      noteTokenId: "0.0.789012",
-      noteSerial: String(Number.parseInt(digest(packet.advanceId).slice(0, 5), 16)),
-      hcsTopicId: "0.0.567890",
-      hcsSequenceNumber: String(Number.parseInt(digest(`${packet.advanceId}:hcs`).slice(0, 5), 16)),
+  async fund(
+    packet: FundingPacket,
+    recordProgress?: FundingProgressRecorder
+  ): Promise<FundingResult> {
+    const baseTimestamp = Math.floor(Date.now() / 1000);
+    const simulatedTransaction = (stage: string) => ({
+      transactionId: `simulated:${stage}:${digest(packet.advanceId).slice(0, 16)}`,
       consensusTimestamp: new Date().toISOString(),
-      consensusStatus: "SIMULATED",
-      mirrorTransactionUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(tx)}`,
-      mirrorTokenUrl: "https://hashscan.io/testnet/token/0.0.789012",
-      hashscanTransactionUrl: `https://hashscan.io/testnet/transaction/${encodeURIComponent(tx)}`,
-      hashscanTokenUrl: "https://hashscan.io/testnet/token/0.0.789012",
-      hashscanTopicUrl: "https://hashscan.io/testnet/topic/0.0.567890",
+      consensusStatus: "SIMULATED" as const,
+      mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+      hashscanUrl: "https://hashscan.io/testnet"
+    });
+    const serial = String(Number.parseInt(digest(packet.advanceId).slice(0, 5), 16));
+    const authorizationSequenceNumber = String(baseTimestamp);
+    const fundedSequenceNumber = String(baseTimestamp + 1);
+    const transactions = {
+      authorization: simulatedTransaction("authorization"),
+      noteMint: simulatedTransaction("note-mint"),
+      settlement: simulatedTransaction("settlement"),
+      fundedEvent: simulatedTransaction("funded-event")
+    };
+    await recordProgress?.({
+      version: 2,
+      stage: "FUNDED",
+      transactions,
+      noteSerial: serial,
+      authorizationSequenceNumber,
+      fundedSequenceNumber
+    });
+    return {
+      version: 2,
+      asset: {
+        tokenId: "0.0.789011",
+        name: "USDC DEMO",
+        symbol: "USDC",
+        decimals: 6,
+        amountUnits: packet.amountStableUnits.toString(),
+        amountMinor: packet.amountMinor,
+        label: "Demo USDC — no real value",
+        mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      note: {
+        tokenId: "0.0.789012",
+        serial,
+        mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      topic: {
+        topicId: "0.0.567890",
+        authorizationSequenceNumber,
+        fundedSequenceNumber,
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      transactions,
       simulated: true
     };
   }

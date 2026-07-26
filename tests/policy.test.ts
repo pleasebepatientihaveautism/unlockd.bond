@@ -33,7 +33,7 @@ describe("deterministic policy", () => {
     expect(result.decision).toBe("AUTHORIZED");
     expect(result.amountMinor).toBeLessThanOrEqual(140_000);
     expect(result.amountMinor).toBeLessThanOrEqual(result.policyMaxMinor);
-    expect(result.marketHaircutBps).toBe(3100);
+    expect(result.marketHaircutBps).toBe(0);
   });
 
   it("fails closed on stale Graph evidence", () => {
@@ -59,7 +59,7 @@ describe("deterministic policy", () => {
     ).toThrowError("Market oracle is paused");
   });
 
-  it("values private options after strike and a conservative illiquidity haircut", () => {
+  it("caps private options at 70% of vested intrinsic equity value", () => {
     const privateRisk: RiskDecision = {
       ...risk,
       recommendedAdvanceMinor: 150_000,
@@ -73,8 +73,9 @@ describe("deterministic policy", () => {
       minGraphSamples: 2
     });
     expect(result.decision).toBe("AUTHORIZED");
-    expect(result.eligibleEquityValueMinor).toBe(2_160_000);
-    expect(result.marketHaircutBps).toBe(7000);
+    expect(result.eligibleEquityValueMinor).toBe(7_200_000);
+    expect(result.policyMaxMinor).toBe(5_040_000);
+    expect(result.marketHaircutBps).toBe(0);
     expect(result.amountMinor).toBe(150_000);
   });
 

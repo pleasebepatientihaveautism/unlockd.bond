@@ -4,6 +4,7 @@ import { authorizeAdvance } from "../domain/policy.js";
 import {
   calculateAdvancePricing,
   calculateCompanyRiskSignal,
+  calculateEquityLtvCapMinor,
   fallbackCompanyFinancialLookup
 } from "../domain/pricing.js";
 import {
@@ -13,13 +14,19 @@ import {
   toCustomerAdvance,
   toPublicAdvance
 } from "../domain/public.js";
-import type { AdvanceRequest } from "../domain/schemas.js";
+import type {
+  AdvanceRequest,
+  AssetSymbol,
+  MarketSnapshot,
+  PrivateCompanyListing
+} from "../domain/schemas.js";
 import type {
   CompanyFinancialProvider,
   MarketProvider,
   PaymentProvider,
   RiskProvider
 } from "./adapters/types.js";
+import { usdMinorToStableUnits } from "./adapters/types.js";
 import type { AppConfig } from "./config.js";
 import type { AdvanceStore } from "./store.js";
 
@@ -43,8 +50,28 @@ function safeFailureCode(error: unknown): string {
   return "PARTNER_OPERATION_FAILED";
 }
 
+function hasSuccessfulConsensus(result: NonNullable<AdvanceRecord["funding"]>): boolean {
+  if ("version" in result) {
+    return Object.values(result.transactions).every(
+      (transaction) => transaction.consensusStatus === "SUCCESS"
+    );
+  }
+  return result.consensusStatus === "SUCCESS";
+}
+
 export class UnlockdBondService {
   constructor(private readonly deps: ServiceDependencies) {}
+
+  async marketPreview(assetSymbol: AssetSymbol): Promise<MarketSnapshot> {
+    return this.deps.market.snapshot(assetSymbol);
+  }
+
+  async privateCompanies(): Promise<PrivateCompanyListing[]> {
+    if (!this.deps.market.listPrivateCompanies) {
+      throw new Error("PRIVATE_COMPANY_CATALOGUE_UNAVAILABLE");
+    }
+    return this.deps.market.listPrivateCompanies();
+  }
 
   async evaluate(request: AdvanceRequest): Promise<{
     advance: CustomerAdvance;
@@ -54,20 +81,12 @@ export class UnlockdBondService {
     if (this.deps.config.mode === "demo" && !request.synthetic) {
       throw new Error("DEMO_REQUIRES_SYNTHETIC_PROFILE");
     }
-    const [market, companyFinancialLookup] = await Promise.all([
-      this.deps.market.snapshot(request.grant.assetSymbol, request.grant),
-      request.grant.grantType === "OPTION"
-        ? this.deps.companyFinancials.fetchCompanyFinancials(request.grant.companyIdentifier)
-        : Promise.resolve(fallbackCompanyFinancialLookup("PUBLIC_MARKET_ENRICHMENT_NOT_REQUIRED"))
-    ]);
+    const market = await this.deps.market.snapshot(request.grant.assetSymbol, request.grant);
+    const companyFinancialLookup = fallbackCompanyFinancialLookup("EQUITY_PRICE_ONLY_POLICY");
     if (this.deps.config.mode === "live" && market.simulated) {
       throw new Error("LIVE_GRAPH_EVIDENCE_REQUIRED");
     }
-    const prePolicyMax = Math.min(
-      request.request.amountMinor,
-      Math.floor(request.employment.monthlyNetIncomeMinor / 2),
-      this.deps.config.POLICY_FIXED_CAP_MINOR
-    );
+    const prePolicyMax = calculateEquityLtvCapMinor(request, market);
     const { decision: risk, receipt: riskReceipt } = await this.deps.risk.evaluate(
       request,
       market,
@@ -99,7 +118,6 @@ export class UnlockdBondService {
     const employeeCommitment = saltedCommitment(
       {
         employeeRef: request.employeeRef,
-        employment: request.employment,
         grant: request.grant,
         request: request.request
       },
@@ -115,7 +133,7 @@ export class UnlockdBondService {
       requestId: request.requestId,
       state: authorization.decision,
       mode: this.deps.config.mode,
-      recipientAccountId: request.recipientAccountId,
+      recipientAccountId: this.deps.config.HEDERA_RECIPIENT_ID,
       termDays: request.request.termDays,
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
@@ -134,6 +152,7 @@ export class UnlockdBondService {
       pricing,
       authorization,
       funding: null,
+      fundingProgress: null,
       failureCode: null
     };
     const reserved = await this.deps.store.reserve(record);
@@ -158,24 +177,31 @@ export class UnlockdBondService {
     }
     try {
       const record = begun.record;
-      const result = await this.deps.payment.fund({
-        advanceId: record.advanceId,
-        recipientAccountId: record.recipientAccountId,
-        amountTinybar:
-          BigInt(record.authorization.amountMinor) *
-          BigInt(this.deps.config.PAYOUT_TINYBAR_PER_USD_MINOR),
-        employeeCommitment: record.employeeCommitment,
-        decisionCommitment: record.decisionCommitment,
-        marketCommitment: record.marketCommitment,
-        graphBlock: record.market.indexedBlock,
-        graphDeployment: record.market.subgraphDeployment,
-        zeroGRequestId: record.riskReceipt.requestId,
-        zeroGProvider: record.riskReceipt.provider,
-        zeroGTeeVerified: record.riskReceipt.teeVerified
-      });
+      if (record.recipientAccountId !== this.deps.config.HEDERA_RECIPIENT_ID) {
+        throw new Error("SETTLEMENT_RECIPIENT_CONFIG_CHANGED");
+      }
+      const result = await this.deps.payment.fund(
+        {
+          advanceId: record.advanceId,
+          recipientAccountId: record.recipientAccountId,
+          amountMinor: record.authorization.amountMinor,
+          amountStableUnits: usdMinorToStableUnits(record.authorization.amountMinor),
+          employeeCommitment: record.employeeCommitment,
+          decisionCommitment: record.decisionCommitment,
+          marketCommitment: record.marketCommitment,
+          graphBlock: record.market.indexedBlock,
+          graphDeployment: record.market.subgraphDeployment,
+          zeroGRequestId: record.riskReceipt.requestId,
+          zeroGProvider: record.riskReceipt.provider,
+          zeroGTeeVerified: record.riskReceipt.teeVerified
+        },
+        async (progress) => {
+          await this.deps.store.recordFundingProgress(advanceId, progress);
+        }
+      );
       if (
         this.deps.config.mode !== "demo" &&
-        (result.simulated || result.consensusStatus !== "SUCCESS")
+        (result.simulated || !hasSuccessfulConsensus(result))
       ) {
         throw new Error("HEDERA_CONSENSUS_SUCCESS_REQUIRED");
       }

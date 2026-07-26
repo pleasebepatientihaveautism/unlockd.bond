@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
+  AccountBalanceQuery,
   AccountCreateTransaction,
   AccountId,
   Client,
@@ -12,7 +13,8 @@ import {
   TokenCreateTransaction,
   TokenSupplyType,
   TokenType,
-  TopicCreateTransaction
+  TopicCreateTransaction,
+  TransferTransaction
 } from "@hashgraph/sdk";
 import { parse } from "dotenv";
 
@@ -20,6 +22,8 @@ const envPath = path.resolve(".env.hedera.local");
 const evidencePath = path.resolve("hedera-testnet-evidence.json");
 const mirrorUrl = "https://testnet.mirrornode.hedera.com";
 const hashscanUrl = "https://hashscan.io/testnet";
+const stableInitialSupply = 1_000_000_000_000_000n;
+const stableCreationOperatorTargetTinybar = 1_620_000_000n;
 const operatorIdText = process.env.HEDERA_OPERATOR_ID ?? "0.0.9750175";
 const state: Record<string, string> = existsSync(envPath)
   ? parse(readFileSync(envPath, "utf8"))
@@ -48,10 +52,11 @@ function envText(values: Record<string, string>): string {
     "HEDERA_POOL_KEY",
     "HEDERA_TOPIC_ID",
     "HEDERA_TOKEN_ID",
+    "HEDERA_STABLE_TOKEN_ID",
+    "HEDERA_RECIPIENT_ID",
     "HEDERA_MIRROR_URL",
-    "PAYOUT_TINYBAR_PER_USD_MINOR",
     "POLICY_FIXED_CAP_MINOR",
-    "TREASURY_RESERVE_TINYBAR"
+    "TREASURY_STABLE_RESERVE_MINOR"
   ];
   return `${order.map((key) => `${key}=${values[key] ?? ""}`).join("\n")}\n`;
 }
@@ -162,7 +167,8 @@ function writeEvidence(): void {
     !state.HEDERA_TREASURY_ID ||
     !state.HEDERA_POOL_ID ||
     !state.HEDERA_TOPIC_ID ||
-    !state.HEDERA_TOKEN_ID
+    !state.HEDERA_TOKEN_ID ||
+    !state.HEDERA_STABLE_TOKEN_ID
   ) {
     return;
   }
@@ -173,12 +179,22 @@ function writeEvidence(): void {
     poolAccountId: state.HEDERA_POOL_ID,
     lifecycleTopicId: state.HEDERA_TOPIC_ID,
     advanceNoteTokenId: state.HEDERA_TOKEN_ID,
+    stableToken: {
+      tokenId: state.HEDERA_STABLE_TOKEN_ID,
+      name: "USDC DEMO",
+      symbol: "USDC",
+      decimals: 6,
+      initialAndMaximumSupply: "1000000000",
+      label: "Demo USDC — no real value"
+    },
+    recipientAccountId: state.HEDERA_RECIPIENT_ID,
     publicEvidence: {
       operator: `${hashscanUrl}/account/${state.HEDERA_OPERATOR_ID}`,
       treasury: `${hashscanUrl}/account/${state.HEDERA_TREASURY_ID}`,
       pool: `${hashscanUrl}/account/${state.HEDERA_POOL_ID}`,
       topic: `${hashscanUrl}/topic/${state.HEDERA_TOPIC_ID}`,
       token: `${hashscanUrl}/token/${state.HEDERA_TOKEN_ID}`,
+      stableToken: `${hashscanUrl}/token/${state.HEDERA_STABLE_TOKEN_ID}`,
       mirrorTopicMessages: `${mirrorUrl}/api/v1/topics/${state.HEDERA_TOPIC_ID}/messages`,
       mirrorToken: `${mirrorUrl}/api/v1/tokens/${state.HEDERA_TOKEN_ID}`
     },
@@ -227,10 +243,11 @@ Object.assign(state, {
   HEDERA_POOL_KEY: poolKey.toStringDer(),
   HEDERA_TOPIC_ID: state.HEDERA_TOPIC_ID ?? "",
   HEDERA_TOKEN_ID: state.HEDERA_TOKEN_ID ?? "",
+  HEDERA_STABLE_TOKEN_ID: state.HEDERA_STABLE_TOKEN_ID ?? "",
+  HEDERA_RECIPIENT_ID: state.HEDERA_RECIPIENT_ID ?? operatorIdText,
   HEDERA_MIRROR_URL: mirrorUrl,
-  PAYOUT_TINYBAR_PER_USD_MINOR: state.PAYOUT_TINYBAR_PER_USD_MINOR ?? "1000",
   POLICY_FIXED_CAP_MINOR: state.POLICY_FIXED_CAP_MINOR ?? "1000",
-  TREASURY_RESERVE_TINYBAR: state.TREASURY_RESERVE_TINYBAR ?? "100000000"
+  TREASURY_STABLE_RESERVE_MINOR: state.TREASURY_STABLE_RESERVE_MINOR ?? "10000"
 });
 persistEnv();
 
@@ -290,6 +307,58 @@ try {
     state.HEDERA_TOKEN_ID = receipt.tokenId.toString();
     persistEnv();
   }
+  if (!state.HEDERA_STABLE_TOKEN_ID) {
+    const [operatorBalance, treasuryBalance] = await Promise.all([
+      new AccountBalanceQuery().setAccountId(AccountId.fromString(operatorIdText)).execute(client),
+      new AccountBalanceQuery()
+        .setAccountId(AccountId.fromString(state.HEDERA_TREASURY_ID))
+        .execute(client)
+    ]);
+    const operatorTinybar = BigInt(operatorBalance.hbars.toTinybars().toString());
+    if (operatorTinybar < stableCreationOperatorTargetTinybar) {
+      const transferTinybar = stableCreationOperatorTargetTinybar - operatorTinybar + 1_000_000n;
+      const treasuryTinybar = BigInt(treasuryBalance.hbars.toTinybars().toString());
+      if (treasuryTinybar - transferTinybar < 50_000_000n) {
+        throw new Error("OPERATOR_BALANCE_TOO_LOW_FOR_STABLE_TOKEN_CREATION");
+      }
+      process.stdout.write("Rebalancing Testnet HBAR from treasury to fee payer...\n");
+      const frozen = new TransferTransaction()
+        .addHbarTransfer(
+          AccountId.fromString(state.HEDERA_TREASURY_ID),
+          Hbar.fromTinybars(-transferTinybar)
+        )
+        .addHbarTransfer(AccountId.fromString(operatorIdText), Hbar.fromTinybars(transferTinybar))
+        .setTransactionMemo("unlockd.bond stable-token provisioning fee")
+        .freezeWith(client);
+      const signed = await frozen.sign(treasuryKey);
+      const transaction = await signed.execute(client);
+      const receipt = await transaction.getReceipt(client);
+      if (receipt.status.toString() !== "SUCCESS") {
+        throw new Error("OPERATOR_FEE_REBALANCE_FAILED");
+      }
+    }
+    process.stdout.write("Creating fixed-supply USDC DEMO token...\n");
+    const frozen = new TokenCreateTransaction()
+      .setTokenName("USDC DEMO")
+      .setTokenSymbol("USDC")
+      .setTokenType(TokenType.FungibleCommon)
+      .setDecimals(6)
+      .setInitialSupply(stableInitialSupply)
+      .setSupplyType(TokenSupplyType.Finite)
+      .setMaxSupply(stableInitialSupply)
+      .setTreasuryAccountId(AccountId.fromString(state.HEDERA_TREASURY_ID))
+      .setTokenMemo("Demo USDC; no real value; not Circle-issued")
+      .setMaxTransactionFee(new Hbar(16))
+      .freezeWith(client);
+    const signed = await frozen.sign(treasuryKey);
+    const transaction = await signed.execute(client);
+    const receipt = await transaction.getReceipt(client);
+    if (receipt.status.toString() !== "SUCCESS" || !receipt.tokenId) {
+      throw new Error("HTS_STABLE_TOKEN_CREATE_FAILED");
+    }
+    state.HEDERA_STABLE_TOKEN_ID = receipt.tokenId.toString();
+    persistEnv();
+  }
 
   const pool = await mirrorAccount(state.HEDERA_POOL_ID);
   const tokenAssociation = (await fetch(
@@ -306,6 +375,27 @@ try {
     ).execute(client);
     const receipt = await transaction.getReceipt(client);
     if (receipt.status.toString() !== "SUCCESS") throw new Error("POOL_ASSOCIATION_FAILED");
+  }
+  const recipientId = state.HEDERA_RECIPIENT_ID;
+  const stableAssociation = (await fetch(
+    `${mirrorUrl}/api/v1/accounts/${recipientId}/tokens?token.id=${state.HEDERA_STABLE_TOKEN_ID}`
+  ).then((response) => response.json())) as { tokens?: Array<{ token_id: string }> };
+  if (!stableAssociation.tokens?.some((token) => token.token_id === state.HEDERA_STABLE_TOKEN_ID)) {
+    if (recipientId !== operatorIdText) {
+      throw new Error("RECIPIENT_STABLE_ASSOCIATION_MUST_BE_COMPLETED_BY_RECIPIENT");
+    }
+    process.stdout.write("Associating configured recipient with USDC DEMO...\n");
+    const transaction = await (
+      await new TokenAssociateTransaction()
+        .setAccountId(AccountId.fromString(recipientId))
+        .setTokenIds([state.HEDERA_STABLE_TOKEN_ID])
+        .freezeWith(client)
+        .sign(key)
+    ).execute(client);
+    const receipt = await transaction.getReceipt(client);
+    if (receipt.status.toString() !== "SUCCESS") {
+      throw new Error("RECIPIENT_STABLE_ASSOCIATION_FAILED");
+    }
   }
   writeEvidence();
   process.stdout.write(

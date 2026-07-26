@@ -46,7 +46,7 @@ The honest MVP model is:
 | Hedera payment | Real testnet financial action |
 | HCS messages | Public commitments and lifecycle audit trail |
 
-The MVP is a testnet prototype, not a production credit product, security, payroll service, stablecoin, or legal collateral agreement.
+The MVP is a testnet prototype, not a production credit product, security, payroll service, redeemable stablecoin, or legal collateral agreement. Its `USDC DEMO` token is custom, unbacked, and unrelated to Circle USDC.
 
 ## 3. Recommended target user
 
@@ -57,7 +57,7 @@ An employee of a public company who has:
 - vested RSUs or vested employee options;
 - a public underlying stock price;
 - a short-term liquidity need before payday;
-- a Hedera account capable of receiving test HBAR.
+- the configured Hedera Testnet recipient account associated with `USDC DEMO`.
 
 ### Not in the MVP
 
@@ -128,7 +128,7 @@ Sources:
    - fail-closed rejection with reason codes;
    - temporary unavailability if private compute or live data is unavailable.
 7. Confirm the testnet advance.
-8. Receive test HBAR.
+8. Receive Demo USDC.
 9. Open the proof receipt showing:
    - Graph block, deployment, and data timestamp;
    - 0G model, provider, request ID, and TEE status;
@@ -149,7 +149,7 @@ Sources:
 9. Commit the approved decision hash to HCS.
 10. Mint an HTS Advance Note NFT.
 11. Atomically transfer:
-    - test HBAR from treasury to employee; and
+    - Demo USDC from treasury to the configured recipient; and
     - the Advance Note from treasury to the advance-pool account.
 12. Await a consensus receipt and require `SUCCESS`.
 13. Publish an `ADVANCE_FUNDED` or `FUNDING_FAILED` HCS event.
@@ -896,7 +896,7 @@ The private canonical record may contain:
   "borrowerCommitment": "sha256:...",
   "principalMinor": 78000,
   "displayCurrency": "USD",
-  "payoutAsset": "HBAR_TESTNET",
+  "payoutAsset": "USDC_DEMO_TESTNET",
   "maturity": "2026-08-20T12:00:00Z",
   "zeroGDecisionCommitment": "sha256:...",
   "marketSnapshotCommitment": "sha256:...",
@@ -912,20 +912,22 @@ Source: [Hedera NFT metadata updates](https://docs.hedera.com/native/tokens/upda
 
 After minting the Advance Note into treasury, use one `TransferTransaction` for:
 
-- test HBAR treasury → employee;
+- Demo USDC treasury → configured recipient;
 - Advance Note NFT treasury → advance pool.
 
 Conceptually:
 
 ```ts
 new TransferTransaction()
-  .addHbarTransfer(
+  .addTokenTransfer(
+    stableTokenId,
     treasuryId,
-    Hbar.fromTinybars(-payoutTinybars)
+    -payoutStableUnits
   )
-  .addHbarTransfer(
-    employeeId,
-    Hbar.fromTinybars(payoutTinybars)
+  .addTokenTransfer(
+    stableTokenId,
+    recipientId,
+    payoutStableUnits
   )
   .addNftTransfer(
     noteNftId,
@@ -936,7 +938,7 @@ new TransferTransaction()
 
 Either both balance changes succeed or neither is committed.
 
-The UI must label HBAR as a testnet payment, not dollars. `principalMinor` is the simulated USD-denominated receivable value.
+The UI must label the asset as “Demo USDC — no real value.” `principalMinor` is the simulated USD-denominated receivable value.
 
 Sources:
 
@@ -1019,7 +1021,7 @@ Sources:
 Minimum logical roles:
 
 - operator key: default fee payer;
-- treasury key: controls test HBAR and note inventory;
+- treasury key: controls Demo USDC and note inventory;
 - supply key: mints Advance Notes;
 - pool key: owns funded notes;
 - HCS submit key;
@@ -1144,7 +1146,7 @@ An HTTP response, submitted transaction, transaction ID, or minted NFT is not pr
 - employee request form using synthetic structured profiles;
 - 0G Router call after credentials and funding exist;
 - strict JSON parsing and deterministic policy caps;
-- Hedera Testnet HBAR transfer;
+- Hedera Testnet Demo USDC transfer;
 - HTS NFT creation, mint, and transfer;
 - HCS commitment messages;
 - Mirror Node proof screen;
@@ -1201,7 +1203,7 @@ Success requires:
 2. HCS topic;
 3. HTS NFT collection;
 4. minted serial;
-5. atomic test HBAR + NFT transfer;
+5. atomic Demo USDC + NFT transfer;
 6. consensus receipt `SUCCESS`;
 7. Mirror Node visibility.
 
@@ -1288,7 +1290,7 @@ Do not cut:
 5. Show the deterministic policy reducing the model recommendation to the final safe amount.
 6. Confirm the advance.
 7. Show the Hedera consensus receipt.
-8. Show the employee's test HBAR increase.
+8. Show the configured recipient's Demo USDC increase.
 9. Show the Advance Note NFT held by the pool.
 10. Show the HCS lifecycle event and linked proof receipt.
 
@@ -1398,7 +1400,7 @@ Proceed with unlockd.bond only if the three dependency kill tests pass.
 
 The strongest build is:
 
-> A public-company RSU advance where a custom Graph subgraph supplies live AAPL stock-token risk evidence, 0G privately evaluates minimized employee and market fields with verified TeeML execution, and a bounded agent atomically pays test HBAR while moving an HTS Advance Note to the funding pool and recording HCS commitments.
+> A public-company RSU advance where a custom Graph subgraph supplies live AAPL stock-token risk evidence, 0G privately evaluates minimized employee and market fields with verified TeeML execution, and a bounded agent atomically pays Demo USDC while moving an HTS Advance Note to the funding pool and recording HCS commitments.
 
 The two most important honesty rules are:
 

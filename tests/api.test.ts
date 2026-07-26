@@ -39,6 +39,28 @@ describe("HTTP API", () => {
     });
   });
 
+  it("serves the private-company catalogue", async () => {
+    const response = await request(app()).get("/api/market/private-companies").expect(200);
+    expect(response.body.companies[0]).toMatchObject({
+      ticker: "WHOO.PVT",
+      priceUsdMinor: 480,
+      source: "yahoo-finance-private"
+    });
+    expect(response.headers["cache-control"]).toBe("public, max-age=60");
+  });
+
+  it("publishes the Demo USDC disclosure without settlement secrets", async () => {
+    const response = await request(app()).get("/api/config").expect(200);
+    expect(response.body.payoutAsset).toEqual({
+      name: "USDC DEMO",
+      symbol: "USDC",
+      decimals: 6,
+      tokenId: null,
+      label: "Demo USDC — no real value"
+    });
+    expect(response.body).not.toHaveProperty("recipientAccountId");
+  });
+
   it("requires matching idempotency key", async () => {
     await request(app())
       .post("/api/advances/evaluate")
@@ -82,14 +104,18 @@ describe("HTTP API", () => {
     expect(response.body.error).toBe("ORIGIN_NOT_ALLOWED");
   });
 
-  it("returns field-safe validation errors", async () => {
-    const input = { ...requestFixture(), recipientAccountId: "bad" };
+  it("rejects attempts to override the server-selected settlement recipient", async () => {
+    const input = { ...requestFixture(), recipientAccountId: "0.0.123456" };
     const response = await request(app())
       .post("/api/advances/evaluate")
       .set("Idempotency-Key", input.requestId)
       .send(input)
       .expect(422);
     expect(response.body.error).toBe("VALIDATION_FAILED");
-    expect(JSON.stringify(response.body)).not.toContain("650000");
+    expect(response.body.issues).toContainEqual({
+      path: "",
+      message: 'Unrecognized key: "recipientAccountId"'
+    });
+    expect(JSON.stringify(response.body)).not.toContain("vestedUnits");
   });
 });

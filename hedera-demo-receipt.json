@@ -1,0 +1,88 @@
+{
+  "network": "testnet",
+  "advanceId": "ub_f31a043d4b9c4553b8094e72175e97cb",
+  "recipientAccountId": "0.0.9750175",
+  "amountMinor": 1000,
+  "amountStableUnits": "10000000",
+  "funding": {
+    "version": 2,
+    "asset": {
+      "tokenId": "0.0.9761970",
+      "name": "USDC DEMO",
+      "symbol": "USDC",
+      "decimals": 6,
+      "amountUnits": "10000000",
+      "amountMinor": 1000,
+      "label": "Demo USDC — no real value",
+      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9761970",
+      "hashscanUrl": "https://hashscan.io/testnet/token/0.0.9761970"
+    },
+    "note": {
+      "tokenId": "0.0.9752761",
+      "serial": "3",
+      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/3",
+      "hashscanUrl": "https://hashscan.io/testnet/token/0.0.9752761/3"
+    },
+    "topic": {
+      "topicId": "0.0.9751837",
+      "authorizationSequenceNumber": "7",
+      "fundedSequenceNumber": "8",
+      "hashscanUrl": "https://hashscan.io/testnet/topic/0.0.9751837"
+    },
+    "transactions": {
+      "authorization": {
+        "transactionId": "0.0.9750175@1785035272.011174138",
+        "consensusTimestamp": "1785035276.776669185",
+        "consensusStatus": "SUCCESS",
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785035272-011174138",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785035276.776669185"
+      },
+      "noteMint": {
+        "transactionId": "0.0.9750175@1785035274.863573927",
+        "consensusTimestamp": "1785035279.744599104",
+        "consensusStatus": "SUCCESS",
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785035274-863573927",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785035279.744599104"
+      },
+      "settlement": {
+        "transactionId": "0.0.9750175@1785035275.524600797",
+        "consensusTimestamp": "1785035281.735472104",
+        "consensusStatus": "SUCCESS",
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785035275-524600797",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785035281.735472104"
+      },
+      "fundedEvent": {
+        "transactionId": "0.0.9750175@1785035279.861167550",
+        "consensusTimestamp": "1785035283.344306312",
+        "consensusStatus": "SUCCESS",
+        "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785035279-861167550",
+        "hashscanUrl": "https://hashscan.io/testnet/transaction/1785035283.344306312"
+      }
+    },
+    "simulated": false
+  },
+  "generatedAt": "2026-07-26T03:08:04.664Z",
+  "mirrorVerifiedAt": "2026-07-26T03:08:07.592Z",
+  "verification": {
+    "transactions": {
+      "authorization": "1785035276.776669185",
+      "noteMint": "1785035279.744599104",
+      "settlement": "1785035281.735472104",
+      "fundedEvent": "1785035283.344306312"
+    },
+    "stablePayout": {
+      "tokenId": "0.0.9761970",
+      "recipient": "0.0.9750175",
+      "amountUnits": "10000000",
+      "totalSupply": "1000000000000000"
+    },
+    "nft": {
+      "owner": "0.0.9751836",
+      "url": "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.9752761/nfts/3"
+    },
+    "hcs": {
+      "authorizationSequenceNumber": "7",
+      "fundedSequenceNumber": "8"
+    }
+  }
+}

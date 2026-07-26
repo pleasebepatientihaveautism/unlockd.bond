@@ -101,8 +101,10 @@ const payment =
         poolId: liveValue(config.HEDERA_POOL_ID, "HEDERA_POOL_ID"),
         topicId: liveValue(config.HEDERA_TOPIC_ID, "HEDERA_TOPIC_ID"),
         tokenId: liveValue(config.HEDERA_TOKEN_ID, "HEDERA_TOKEN_ID"),
+        stableTokenId: liveValue(config.HEDERA_STABLE_TOKEN_ID, "HEDERA_STABLE_TOKEN_ID"),
+        recipientId: config.HEDERA_RECIPIENT_ID,
         mirrorUrl: config.HEDERA_MIRROR_URL,
-        treasuryReserveTinybar: config.TREASURY_RESERVE_TINYBAR,
+        treasuryStableReserveMinor: config.TREASURY_STABLE_RESERVE_MINOR,
         requireTeeVerification: config.mode === "live"
       });
 const service = new UnlockdBondService({

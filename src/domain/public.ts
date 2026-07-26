@@ -1,6 +1,12 @@
 import type { Authorization } from "./policy.js";
 import type { EquityPricingQuote } from "./pricing.js";
-import type { FundingResult, MarketSnapshot, RiskDecision, RiskReceipt } from "./schemas.js";
+import type {
+  FundingProgress,
+  FundingResult,
+  MarketSnapshot,
+  RiskDecision,
+  RiskReceipt
+} from "./schemas.js";
 
 export type AdvanceState = "AUTHORIZED" | "FUNDING" | "FUNDED" | "FUNDING_FAILED" | "REJECTED";
 
@@ -28,6 +34,7 @@ export interface AdvanceRecord {
   pricing: EquityPricingQuote;
   authorization: Authorization;
   funding: FundingResult | null;
+  fundingProgress: FundingProgress | null;
   failureCode: string | null;
 }
 

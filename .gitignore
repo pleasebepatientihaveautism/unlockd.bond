@@ -152,3 +152,5 @@ vite.config.ts.timestamp-*
 # Private design and comparison research
 design-research/
 design-qa.md
+docs/secfi-dashboard-audit-*/
+docs/SECFI_*.md
