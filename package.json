@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:coresignal": "DOTENV_CONFIG_PATH=.env.coresignal.local npm run dev",
     "dev:web": "vite",
     "dev:server": "tsx watch src/server/index.ts",
     "build": "tsc -b && vite build",
@@ -20,7 +21,10 @@
     "hedera:provision": "tsx scripts/provision-hedera.ts",
     "dev:hedera": "DOTENV_CONFIG_PATH=.env.hedera.local tsx watch src/server/index.ts",
     "hedera:demo": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/run-hedera-demo.ts",
-    "hedera:verify": "tsx scripts/verify-hedera.ts"
+    "hedera:verify": "tsx scripts/verify-hedera.ts",
+    "coresignal:configure": "tsx scripts/configure-coresignal.ts",
+    "yahoo:check": "tsx scripts/check-yahoo-private-price.ts",
+    "pricing:check": "tsx scripts/check-pricing.ts"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.2.6",

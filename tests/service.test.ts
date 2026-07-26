@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FallbackCompanyFinancialProvider } from "../src/server/adapters/company-financials.js";
 import {
   DemoMarketProvider,
   DemoPaymentProvider,
@@ -15,6 +16,7 @@ function service() {
     config: testConfig(),
     store: new MemoryAdvanceStore(),
     market: new DemoMarketProvider(),
+    companyFinancials: new FallbackCompanyFinancialProvider(),
     risk: new DemoRiskProvider(),
     payment: new DemoPaymentProvider()
   });
@@ -57,6 +59,15 @@ describe("unlockd.bond service", () => {
       eligibleEquityValueMinor: 2_160_000,
       marketHaircutBps: 7000
     });
+    expect(result.advance.pricing).toMatchObject({
+      referenceSharePriceMinor: 480,
+      strikePriceMinor: 120,
+      netValuePerOptionMinor: 360,
+      grossEquityValueMinor: 7_200_000,
+      eligibleEquityValueMinor: 2_160_000,
+      poolUpsideShareBps: 3500,
+      valuationSource: "EMPLOYEE_409A"
+    });
     expect(result.advance.risk.reasonCodes).toContain("PRIVATE_COMPANY_ILLIQUID");
   });
 
@@ -82,6 +93,7 @@ describe("unlockd.bond service", () => {
       config,
       store: new MemoryAdvanceStore(),
       market: new DemoMarketProvider(),
+      companyFinancials: new FallbackCompanyFinancialProvider(),
       risk: new DemoRiskProvider(),
       payment: new DemoPaymentProvider() as PaymentProvider
     });

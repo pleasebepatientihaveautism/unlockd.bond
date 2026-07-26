@@ -1,3 +1,4 @@
+import type { CompanyFinancialLookup } from "../../domain/pricing.js";
 import type {
   AdvanceRequest,
   AssetSymbol,
@@ -8,7 +9,12 @@ import type {
 } from "../../domain/schemas.js";
 
 export interface MarketProvider {
-  snapshot(assetSymbol: AssetSymbol): Promise<MarketSnapshot>;
+  snapshot(assetSymbol: AssetSymbol, grant?: AdvanceRequest["grant"]): Promise<MarketSnapshot>;
+  ready(): Promise<boolean>;
+}
+
+export interface CompanyFinancialProvider {
+  fetchCompanyFinancials(companyIdentifier: string): Promise<CompanyFinancialLookup>;
   ready(): Promise<boolean>;
 }
 

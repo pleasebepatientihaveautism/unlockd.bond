@@ -19,26 +19,35 @@ import {
   X
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { PublicAdvance } from "../domain/public";
+import type { CustomerAdvance } from "../domain/public";
 import type { AdvanceRequest, AssetSymbol } from "../domain/schemas";
 import { evaluateAdvance, fundAdvance } from "./api";
 
 type FormState = {
   asset: AssetSymbol;
+  companyIdentifier: string;
   account: string;
   income: string;
   units: string;
   strike: string;
+  sharePrice: string;
+  valuationDate: string;
   amount: string;
   term: "14" | "30" | "45";
 };
 
+const daysAgoIso = (days: number) =>
+  new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
 const initialForm: FormState = {
   asset: "AAPL",
+  companyIdentifier: "apple.com",
   account: "0.0.653284",
   income: "6500",
   units: "120.0000",
   strike: "0",
+  sharePrice: "",
+  valuationDate: "",
   amount: "1500",
   term: "30"
 };
@@ -167,6 +176,21 @@ const usd = (minor: number) =>
     maximumFractionDigits: 0
   }).format(minor / 100);
 
+const usdPrecise = (minor: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(minor / 100);
+
+const percentFromBps = (bps: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "percent",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1
+  }).format(bps / 10_000);
+
 function buildInput(form: FormState): AdvanceRequest {
   const id = crypto.randomUUID().replaceAll("-", "");
   return {
@@ -181,9 +205,14 @@ function buildInput(form: FormState): AdvanceRequest {
     },
     grant: {
       assetSymbol: form.asset,
+      companyIdentifier: form.companyIdentifier,
       grantType: form.asset === "WHOOP" ? "OPTION" : "RSU",
       vestedUnits: form.units,
       strikePriceMinor: form.asset === "WHOOP" ? Math.round(Number(form.strike) * 100) : 0,
+      referenceSharePriceMinor:
+        form.asset === "WHOOP" ? Math.round(Number(form.sharePrice) * 100) : null,
+      valuationDate: form.asset === "WHOOP" ? form.valuationDate : null,
+      valuationSource: form.asset === "WHOOP" ? "SYNTHETIC" : null,
       transferRestricted: true,
       attestationCommitment: `sha256:${"a".repeat(64)}`
     },
@@ -197,7 +226,7 @@ function buildInput(form: FormState): AdvanceRequest {
 
 export function App() {
   const [form, setForm] = useState(initialForm);
-  const [advance, setAdvance] = useState<PublicAdvance | null>(null);
+  const [advance, setAdvance] = useState<CustomerAdvance | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState<"evaluate" | "fund" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -221,8 +250,13 @@ export function App() {
     setForm({
       ...form,
       asset,
+      companyIdentifier: asset === "WHOOP" ? "whoop.com" : "apple.com",
       units: asset === "WHOOP" ? "20000.0000" : "120.0000",
-      strike: asset === "WHOOP" ? "1.20" : "0"
+      strike: asset === "WHOOP" ? "1.20" : "0",
+      // These satisfy the request schema only; the server replaces both with
+      // fresh Yahoo private-market evidence before any pricing calculation.
+      sharePrice: asset === "WHOOP" ? "7.30" : "",
+      valuationDate: asset === "WHOOP" ? daysAgoIso(0) : ""
     });
     setAdvance(null);
     setToken(null);
@@ -397,7 +431,7 @@ export function App() {
                 <div className="metric-status">
                   <TrendingUp aria-hidden="true" size={16} />
                   {privateCompany
-                    ? "Synthetic private valuation available"
+                    ? "Yahoo private-market price available"
                     : "Public market evidence available"}
                 </div>
               </article>
@@ -459,8 +493,11 @@ export function App() {
                   <li>
                     <span>2</span>
                     <div>
-                      <strong>Use common-share evidence</strong>
-                      <p>Synthetic 409A FMV of $4.80, less the $1.20 exercise price.</p>
+                      <strong>Load private-market price evidence</strong>
+                      <p>
+                        Parse the current WHOOP price from Yahoo Finance, then subtract the $1.20
+                        exercise price.
+                      </p>
                     </div>
                   </li>
                   <li>
@@ -479,9 +516,10 @@ export function App() {
                   </li>
                 </ol>
                 <p className="private-model-note">
-                  WHOOP’s $10.1B Series G valuation is company-level context only—not an employee
-                  common-share price. The shares remain restricted; this demo creates no transfer,
-                  pledge, or lien.
+                  Yahoo’s estimated company valuation is retained as context and never divided into
+                  an invented share count. The displayed WHOO.PVT price is a private-market
+                  estimate; the shares remain restricted and this demo creates no transfer, pledge,
+                  or lien.
                 </p>
               </article>
             ) : null}
@@ -531,13 +569,34 @@ export function App() {
                   value={form.units}
                 />
                 {privateCompany ? (
-                  <Field
-                    help="Synthetic option exercise price used for this example."
-                    label="Exercise price"
-                    onChange={(value) => setForm({ ...form, strike: value })}
-                    prefix="USD"
-                    value={form.strike}
-                  />
+                  <>
+                    <Field
+                      help="Coresignal shorthand or company domain used for risk enrichment."
+                      inputMode="text"
+                      label="Company identifier"
+                      onChange={(value) => setForm({ ...form, companyIdentifier: value })}
+                      prefix="ID"
+                      value={form.companyIdentifier}
+                    />
+                    <div className="field">
+                      <span className="field-label">Private-market price</span>
+                      <span className="control">
+                        <span className="control-prefix">Yahoo</span>
+                        <strong>Loaded at evaluation</strong>
+                      </span>
+                      <span className="field-help">
+                        The server parses WHOO.PVT and fails closed if neither live nor cached
+                        evidence is available.
+                      </span>
+                    </div>
+                    <Field
+                      help="Synthetic option exercise price used for this example."
+                      label="Exercise price"
+                      onChange={(value) => setForm({ ...form, strike: value })}
+                      prefix="USD"
+                      value={form.strike}
+                    />
+                  </>
                 ) : null}
                 <Field
                   help="Simulated amount you would like to access."
@@ -610,8 +669,8 @@ export function App() {
                     selectedAdvanceIsPrivate
                       ? [
                           [
-                            "Common FMV",
-                            advance ? `${usd(advance.market.priceUsdMinor)} / share` : "—"
+                            "Yahoo price",
+                            advance ? `${usdPrecise(advance.market.priceUsdMinor)} / share` : "—"
                           ],
                           ["Evidence age", graphAge],
                           ["Evidence bundle", advance?.market.subgraphDeployment ?? "—"]
@@ -669,6 +728,65 @@ export function App() {
                   title="Bounded payment"
                 />
               </div>
+
+              {advance?.pricing ? (
+                <section className="valuation-breakdown" aria-labelledby="valuation-title">
+                  <div className="valuation-heading">
+                    <div>
+                      <span className="section-kicker">Equity pricing</span>
+                      <h3 id="valuation-title">Your valuation breakdown</h3>
+                    </div>
+                    <span className="pricing-source">
+                      {advance.pricing.valuationSource === "YAHOO_PRIVATE_MARKET"
+                        ? "Yahoo Finance · WHOO.PVT"
+                        : advance.pricing.companyRiskSource === "coresignal"
+                          ? `Coresignal · ${advance.pricing.cacheStatus}`
+                          : "Conservative fallback"}
+                    </span>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>Reference share price</dt>
+                      <dd>{usdPrecise(advance.pricing.referenceSharePriceMinor)}</dd>
+                    </div>
+                    <div>
+                      <dt>Exercise price</dt>
+                      <dd>{usdPrecise(advance.pricing.strikePriceMinor)}</dd>
+                    </div>
+                    <div>
+                      <dt>Net value per option</dt>
+                      <dd>{usdPrecise(advance.pricing.netValuePerOptionMinor)}</dd>
+                    </div>
+                    <div>
+                      <dt>Gross vested value</dt>
+                      <dd>{usd(advance.pricing.grossEquityValueMinor)}</dd>
+                    </div>
+                    <div>
+                      <dt>Total risk haircut</dt>
+                      <dd>{percentFromBps(advance.pricing.totalHaircutBps)}</dd>
+                    </div>
+                    <div>
+                      <dt>Eligible equity value</dt>
+                      <dd>{usd(advance.pricing.eligibleEquityValueMinor)}</dd>
+                    </div>
+                    <div>
+                      <dt>Equity-based limit</dt>
+                      <dd>{usd(advance.pricing.equityBasedCreditLimitMinor)}</dd>
+                    </div>
+                    <div>
+                      <dt>Pool upside share</dt>
+                      <dd>{percentFromBps(advance.pricing.poolUpsideShareBps)}</dd>
+                    </div>
+                  </dl>
+                  <p>
+                    {advance.pricing.preferredOverhangRatioBps === null
+                      ? "Company balance-sheet coverage was unavailable, so the quote uses the documented fallback upside share."
+                      : `Preferred-stock overhang is ${percentFromBps(
+                          advance.pricing.preferredOverhangRatioBps
+                        )}. It adjusts pool pricing, not the employee's common-share price.`}
+                  </p>
+                </section>
+              ) : null}
 
               {authorized ? (
                 <section className="approval">

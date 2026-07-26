@@ -945,6 +945,61 @@ dd {
   white-space: nowrap;
 }
 
+.valuation-breakdown {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.valuation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.valuation-heading h3 {
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.pricing-source {
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--surface-quiet);
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.valuation-breakdown dl {
+  margin: 13px 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 18px;
+}
+
+.valuation-breakdown dl div {
+  min-height: 31px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.valuation-breakdown > p {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .approval {
   margin-top: 12px;
   padding: 16px;
@@ -1272,6 +1327,10 @@ footer {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .valuation-breakdown dl {
     grid-template-columns: 1fr;
   }
 

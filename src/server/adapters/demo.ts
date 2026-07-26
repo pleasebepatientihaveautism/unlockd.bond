@@ -18,9 +18,15 @@ function digest(value: string): string {
 }
 
 export class DemoMarketProvider implements MarketProvider {
-  async snapshot(assetSymbol: AssetSymbol): Promise<MarketSnapshot> {
+  async snapshot(
+    assetSymbol: AssetSymbol,
+    grant?: AdvanceRequest["grant"]
+  ): Promise<MarketSnapshot> {
     const now = Math.floor(Date.now() / 1000);
     if (assetSymbol === "WHOOP") {
+      const valuationTimestamp = grant?.valuationDate
+        ? Math.floor(Date.parse(`${grant.valuationDate}T00:00:00Z`) / 1000)
+        : now - 30 * 24 * 60 * 60;
       return marketSnapshotSchema.parse({
         evidenceType: "PRIVATE_VALUATION",
         source: "issuer-valuation",
@@ -29,8 +35,8 @@ export class DemoMarketProvider implements MarketProvider {
         assetSymbol: "WHOOP",
         tokenAddress: null,
         feedAddress: null,
-        priceUsdMinor: 480,
-        priceUpdatedAt: now - 30 * 24 * 60 * 60,
+        priceUsdMinor: grant?.referenceSharePriceMinor ?? 480,
+        priceUpdatedAt: valuationTimestamp,
         oraclePaused: false,
         sampleCount: 1,
         realizedVolatilityBps: 0,
@@ -38,7 +44,7 @@ export class DemoMarketProvider implements MarketProvider {
         subgraphDeployment: "synthetic-409a-demo-v1",
         indexedBlock: 1,
         indexedBlockHash: `0x${digest("whoop-synthetic-valuation-evidence")}`,
-        indexedBlockTimestamp: now - 30 * 24 * 60 * 60,
+        indexedBlockTimestamp: valuationTimestamp,
         hasIndexingErrors: false,
         valuationBasis: "Synthetic 409A common-share FMV",
         externalEvidenceLabel: "WHOOP Series G company valuation context",

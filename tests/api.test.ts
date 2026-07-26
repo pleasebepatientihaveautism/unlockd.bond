@@ -1,6 +1,7 @@
 import pino from "pino";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { FallbackCompanyFinancialProvider } from "../src/server/adapters/company-financials.js";
 import {
   DemoMarketProvider,
   DemoPaymentProvider,
@@ -17,6 +18,7 @@ function app() {
     config,
     store: new MemoryAdvanceStore(),
     market: new DemoMarketProvider(),
+    companyFinancials: new FallbackCompanyFinancialProvider(),
     risk: new DemoRiskProvider(),
     payment: new DemoPaymentProvider()
   });
@@ -31,6 +33,7 @@ describe("HTTP API", () => {
     expect(ready.body.checks).toEqual({
       store: true,
       market: true,
+      companyFinancials: true,
       risk: true,
       payment: true
     });
@@ -53,6 +56,14 @@ describe("HTTP API", () => {
       .send(input)
       .expect(201);
     expect(evaluated.body.advance.state).toBe("AUTHORIZED");
+    expect(evaluated.body.advance.pricing).toMatchObject({
+      referenceSharePriceMinor: 21_347,
+      companyRiskSource: "fallback_default"
+    });
+    const publicProof = await request(server)
+      .get(`/api/advances/${evaluated.body.advance.advanceId}`)
+      .expect(200);
+    expect(publicProof.body.advance).not.toHaveProperty("pricing");
     const funded = await request(server)
       .post(`/api/advances/${evaluated.body.advance.advanceId}/fund`)
       .send({ confirmationToken: evaluated.body.confirmationToken })

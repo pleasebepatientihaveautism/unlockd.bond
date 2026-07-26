@@ -13,9 +13,13 @@ export const requestFixture = (overrides: Partial<AdvanceRequest> = {}): Advance
   },
   grant: {
     assetSymbol: "AAPL",
+    companyIdentifier: "apple.com",
     grantType: "RSU",
     vestedUnits: "120.000000",
     strikePriceMinor: 0,
+    referenceSharePriceMinor: null,
+    valuationDate: null,
+    valuationSource: null,
     transferRestricted: true,
     attestationCommitment: `sha256:${"a".repeat(64)}`
   },
@@ -59,9 +63,13 @@ export const privateRequestFixture = (overrides: Partial<AdvanceRequest> = {}): 
   requestFixture({
     grant: {
       assetSymbol: "WHOOP",
+      companyIdentifier: "whoop.com",
       grantType: "OPTION",
       vestedUnits: "20000.000000",
       strikePriceMinor: 120,
+      referenceSharePriceMinor: 480,
+      valuationDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      valuationSource: "EMPLOYEE_409A",
       transferRestricted: true,
       attestationCommitment: `sha256:${"a".repeat(64)}`
     },

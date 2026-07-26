@@ -19,9 +19,13 @@ const input = {
   },
   grant: {
     assetSymbol: "AAPL",
+    companyIdentifier: "apple.com",
     grantType: "RSU",
     vestedUnits: "120.000000",
     strikePriceMinor: 0,
+    referenceSharePriceMinor: null,
+    valuationDate: null,
+    valuationSource: null,
     transferRestricted: true,
     attestationCommitment: `sha256:${"a".repeat(64)}`
   },

@@ -1,13 +1,20 @@
 import "dotenv/config";
+import path from "node:path";
 import { Pool } from "pg";
 import pino from "pino";
+import { FallbackCompanyFinancialProvider } from "./adapters/company-financials.js";
 import { DemoMarketProvider, DemoPaymentProvider, DemoRiskProvider } from "./adapters/demo.js";
 import { GraphMarketProvider } from "./adapters/graph.js";
 import { HederaPaymentProvider } from "./adapters/hedera.js";
+import { YahooPrivateMarketProvider } from "./adapters/yahoo-private-market.js";
 import { ZeroGRiskProvider } from "./adapters/zero-g.js";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { PostgresAdvanceStore } from "./postgres-store.js";
+import { PersistentApiBudget } from "./pricing/api-budget.js";
+import { CompanyFileCache } from "./pricing/company-cache.js";
+import { CoresignalCompanyClient } from "./pricing/coresignal-client.js";
+import { YahooPrivateCompanyClient } from "./pricing/yahoo-private-client.js";
 import { UnlockdBondService } from "./service.js";
 import { MemoryAdvanceStore } from "./store.js";
 
@@ -41,13 +48,39 @@ const liveValue = (value: string | undefined, name: string): string => {
   if (!value) throw new Error(`LIVE_CONFIG_MISSING:${name}`);
   return value;
 };
-const market =
+const baseMarket =
   config.mode !== "live"
     ? new DemoMarketProvider()
     : new GraphMarketProvider({
         endpoint: liveValue(config.GRAPH_ENDPOINT, "GRAPH_ENDPOINT"),
         apiKey: liveValue(config.GRAPH_API_KEY, "GRAPH_API_KEY")
       });
+const market = new YahooPrivateMarketProvider(
+  baseMarket,
+  new YahooPrivateCompanyClient({
+    pageUrl: config.YAHOO_PRIVATE_MARKET_URL,
+    dataUrl: config.YAHOO_PRIVATE_DATA_URL,
+    cacheFile: path.resolve(config.YAHOO_PRIVATE_CACHE_FILE),
+    cacheTtlSeconds: config.YAHOO_PRIVATE_CACHE_TTL_SECONDS,
+    timeoutMs: config.YAHOO_PRIVATE_TIMEOUT_MS
+  })
+);
+const companyFinancials =
+  config.CORESIGNAL_API_KEY && config.CORESIGNAL_COLLECT_URL_TEMPLATE
+    ? new CoresignalCompanyClient({
+        apiKey: config.CORESIGNAL_API_KEY,
+        collectUrlTemplate: config.CORESIGNAL_COLLECT_URL_TEMPLATE,
+        cache: new CompanyFileCache(
+          path.resolve(config.CORESIGNAL_CACHE_DIR),
+          config.CORESIGNAL_CACHE_TTL_SECONDS
+        ),
+        budget: new PersistentApiBudget(
+          path.resolve(config.CORESIGNAL_USAGE_FILE),
+          config.CORESIGNAL_MAX_CALLS,
+          config.CORESIGNAL_RESERVED_CALLS
+        )
+      })
+    : new FallbackCompanyFinancialProvider();
 const risk =
   config.mode !== "live"
     ? new DemoRiskProvider()
@@ -72,7 +105,14 @@ const payment =
         treasuryReserveTinybar: config.TREASURY_RESERVE_TINYBAR,
         requireTeeVerification: config.mode === "live"
       });
-const service = new UnlockdBondService({ config, store, market, risk, payment });
+const service = new UnlockdBondService({
+  config,
+  store,
+  market,
+  companyFinancials,
+  risk,
+  payment
+});
 const app = createApp({ config, logger, service });
 const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT, mode: config.mode }, "unlockd.bond listening");

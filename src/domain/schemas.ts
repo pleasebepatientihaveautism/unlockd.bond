@@ -21,9 +21,17 @@ export const advanceRequestSchema = z
     }),
     grant: z.object({
       assetSymbol: assetSymbolSchema,
+      companyIdentifier: z
+        .string()
+        .min(2)
+        .max(120)
+        .regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/, "Use a company shorthand or domain"),
       grantType: z.enum(["RSU", "OPTION"]),
       vestedUnits: decimalUnits,
       strikePriceMinor: z.number().int().min(0).max(100_000_000),
+      referenceSharePriceMinor: z.number().int().positive().max(100_000_000).nullable(),
+      valuationDate: z.iso.date().nullable(),
+      valuationSource: z.enum(["PUBLIC_MARKET", "EMPLOYEE_409A", "ISSUER", "SYNTHETIC"]).nullable(),
       transferRestricted: z.literal(true),
       attestationCommitment: z.string().regex(/^sha256:[a-f0-9]{64}$/)
     }),
@@ -42,12 +50,24 @@ export const advanceRequestSchema = z
         message: "RSU strike price must be zero"
       });
     }
+    if (
+      value.grant.grantType === "OPTION" &&
+      (!value.grant.referenceSharePriceMinor ||
+        !value.grant.valuationDate ||
+        !value.grant.valuationSource)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["grant", "referenceSharePriceMinor"],
+        message: "Private options require common-share price evidence and a valuation date"
+      });
+    }
   });
 
 export const marketSnapshotSchema = z
   .object({
     evidenceType: z.enum(["PUBLIC_MARKET", "PRIVATE_VALUATION"]),
-    source: z.enum(["the-graph", "issuer-valuation"]),
+    source: z.enum(["the-graph", "issuer-valuation", "yahoo-finance-private"]),
     network: z.enum(["robinhood", "private-company"]),
     chainId: z.union([z.literal(0), z.literal(4663)]),
     assetSymbol: assetSymbolSchema,
@@ -72,6 +92,9 @@ export const marketSnapshotSchema = z
     hasIndexingErrors: z.boolean(),
     valuationBasis: z.string().min(3).max(160),
     externalEvidenceLabel: z.string().min(3).max(160).nullable(),
+    externalEvidenceUrl: z.url().nullable().optional(),
+    estimatedValuationUsdMinor: z.number().int().positive().nullable().optional(),
+    latestFundingDate: z.iso.date().nullable().optional(),
     simulated: z.boolean()
   })
   .strict()

@@ -19,6 +19,10 @@ assignment, payroll service, or security.
 
 - strict request, market, AI-output, and payment schemas;
 - exact minor-unit and `bigint` authorization arithmetic;
+- transparent private-company grant valuation from common-share evidence,
+  exercise price, vested units, deterministic haircuts, and bounded LTV;
+- optional Coresignal company-risk enrichment with a seven-day disk cache,
+  persistent 100-call budget, ten-call demo reserve, and conservative fallback;
 - explicit 0G `private` trust mode and `verify_tee: true`;
 - Graph `_meta` provenance, freshness, oracle-health, and sample checks;
 - idempotent `AUTHORIZED → FUNDING → FUNDED | FUNDING_FAILED` state transitions;
@@ -58,6 +62,61 @@ npm run dev
 Open `http://localhost:5173`. Demo results are visibly marked **Simulated** and
 are not qualifying 0G, Graph, or Hedera evidence.
 
+## Private-company equity pricing
+
+The employee's private-market reference price and the company's financial-risk
+signal are kept separate. For the WHOOP demo, the server parses the `WHOO.PVT`
+price from Yahoo Finance's highest-valued private-companies table:
+
+```text
+gross vested value = vested options × max(common-share FMV − strike, 0)
+eligible equity value = gross vested value × (1 − deterministic haircuts)
+credit line = min(request, income limit, 25% equity LTV, fixed cap, risk limit)
+```
+
+Yahoo's `regularMarketPrice.raw` is used as the per-share reference price.
+`latestImpliedValuation.raw` is stored only as company-level context and is never
+treated as a share price. Results are cached for 15 minutes, a stale cache may
+be used for up to seven days during a Yahoo outage, and evaluation fails closed
+when no trustworthy price is available:
+
+```bash
+npm run yahoo:check -- WHOO.PVT
+```
+
+Coresignal `preferred_stock` and `common_stock` values are used only to adjust
+the pool's required upside share. They are accounting balance-sheet values and
+are never presented as an employee common-share price.
+
+Configure the supported Coresignal Multi-source Company API through the hidden
+local prompt:
+
+```bash
+npm run coresignal:configure
+npm run dev:coresignal
+```
+
+This writes the key only to ignored `.env.coresignal.local` with file mode
+`0600`. The Multi-source enrichment record confirms company identity and
+provides general company data, but it does not currently include Craft
+Companies `preferred_stock` and `common_stock` balance-sheet fields. Until a
+Craft dataset delivery containing those fields is supplied, the pricing flow
+uses the documented conservative company-risk fallback.
+
+Runtime responses are cached under ignored `cache/companies/` for seven days.
+`api-usage.json` persists attempted and successful calls. Once only ten of the
+100 calls remain, the adapter refuses network access and returns the documented
+35% fallback pool-upside share without blocking the employee flow.
+
+Sanity-check the WHOOP example without funding:
+
+```bash
+npm run pricing:check -- whoop.com 20000 1.20 4.80 1500
+```
+
+The CLI reports valuation, financing terms, cache status, remaining API calls,
+and whether Coresignal or fallback company risk was used.
+
 ## PostgreSQL
 
 ```bash
@@ -65,10 +124,11 @@ docker compose up -d postgres
 npm run db:migrate
 ```
 
-The application stores only the public-safe decision record, commitments,
-server-only commitment nonces, recipient account, authorization limit, and
-receipts. It does not store salary, tenure, vested units, employee reference,
-prompts, completions, or 0G chat IDs.
+The application stores the decision record, derived customer pricing,
+commitments, server-only commitment nonces, recipient account, authorization
+limit, and receipts. It does not store raw salary, tenure, vested units,
+employee reference, prompts, completions, or 0G chat IDs. Customer pricing is
+removed from the public proof endpoint.
 
 ## Live partner mode
 
@@ -174,12 +234,15 @@ payment.
 `GET /api/advances/:advanceId`
 
 Returns only the public-safe evidence envelope; confirmation tokens and raw
-employee inputs are excluded.
+employee inputs are excluded. The customer-only equity pricing breakdown is
+returned by Evaluate and Fund, but is deliberately removed from this public
+proof endpoint.
 
 ### Operations
 
 - `GET /api/health` — process liveness only.
-- `GET /api/ready` — database plus Graph, 0G, and Hedera preflight.
+- `GET /api/ready` — database, market evidence, company data, private risk, and
+  Hedera preflight. Coresignal readiness never spends an API call.
 
 ## Verification
 

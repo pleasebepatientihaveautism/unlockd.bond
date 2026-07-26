@@ -1,9 +1,25 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { confirmationDigest, saltedCommitment, sha256 } from "../domain/canonical.js";
 import { authorizeAdvance } from "../domain/policy.js";
-import { type AdvanceRecord, type PublicAdvance, toPublicAdvance } from "../domain/public.js";
+import {
+  calculateAdvancePricing,
+  calculateCompanyRiskSignal,
+  fallbackCompanyFinancialLookup
+} from "../domain/pricing.js";
+import {
+  type AdvanceRecord,
+  type CustomerAdvance,
+  type PublicAdvance,
+  toCustomerAdvance,
+  toPublicAdvance
+} from "../domain/public.js";
 import type { AdvanceRequest } from "../domain/schemas.js";
-import type { MarketProvider, PaymentProvider, RiskProvider } from "./adapters/types.js";
+import type {
+  CompanyFinancialProvider,
+  MarketProvider,
+  PaymentProvider,
+  RiskProvider
+} from "./adapters/types.js";
 import type { AppConfig } from "./config.js";
 import type { AdvanceStore } from "./store.js";
 
@@ -11,6 +27,7 @@ export interface ServiceDependencies {
   config: AppConfig;
   store: AdvanceStore;
   market: MarketProvider;
+  companyFinancials: CompanyFinancialProvider;
   risk: RiskProvider;
   payment: PaymentProvider;
 }
@@ -30,14 +47,19 @@ export class UnlockdBondService {
   constructor(private readonly deps: ServiceDependencies) {}
 
   async evaluate(request: AdvanceRequest): Promise<{
-    advance: PublicAdvance;
+    advance: CustomerAdvance;
     confirmationToken: string | null;
     idempotentReplay: boolean;
   }> {
     if (this.deps.config.mode === "demo" && !request.synthetic) {
       throw new Error("DEMO_REQUIRES_SYNTHETIC_PROFILE");
     }
-    const market = await this.deps.market.snapshot(request.grant.assetSymbol);
+    const [market, companyFinancialLookup] = await Promise.all([
+      this.deps.market.snapshot(request.grant.assetSymbol, request.grant),
+      request.grant.grantType === "OPTION"
+        ? this.deps.companyFinancials.fetchCompanyFinancials(request.grant.companyIdentifier)
+        : Promise.resolve(fallbackCompanyFinancialLookup("PUBLIC_MARKET_ENRICHMENT_NOT_REQUIRED"))
+    ]);
     if (this.deps.config.mode === "live" && market.simulated) {
       throw new Error("LIVE_GRAPH_EVIDENCE_REQUIRED");
     }
@@ -57,11 +79,21 @@ export class UnlockdBondService {
     ) {
       throw new Error("PRIVATE_TEE_VERIFICATION_REQUIRED");
     }
-    const authorization = authorizeAdvance(request, market, risk, {
+    const policyConfig = {
       fixedCapMinor: this.deps.config.POLICY_FIXED_CAP_MINOR,
       maxGraphAgeSeconds: this.deps.config.GRAPH_MAX_AGE_SECONDS,
       minGraphSamples: this.deps.config.GRAPH_MIN_SAMPLES
-    });
+    };
+    // Preserve the existing fail-closed evidence validation before producing terms.
+    authorizeAdvance(request, market, risk, policyConfig);
+    const companyRisk = calculateCompanyRiskSignal(companyFinancialLookup);
+    const { quote: pricing, authorization } = calculateAdvancePricing(
+      request,
+      market,
+      risk,
+      companyRisk,
+      policyConfig
+    );
     const token = confirmationToken(request.requestId, this.deps.config.CONFIRMATION_SECRET);
     const now = new Date();
     const employeeCommitment = saltedCommitment(
@@ -74,7 +106,7 @@ export class UnlockdBondService {
       this.deps.config.COMMITMENT_SECRET
     );
     const decisionCommitment = saltedCommitment(
-      { risk, authorization },
+      { risk, authorization, pricing },
       this.deps.config.COMMITMENT_SECRET
     );
     const marketCommitment = saltedCommitment(market, this.deps.config.COMMITMENT_SECRET);
@@ -99,13 +131,14 @@ export class UnlockdBondService {
       market,
       risk: { ...risk, assumptions: [] },
       riskReceipt,
+      pricing,
       authorization,
       funding: null,
       failureCode: null
     };
     const reserved = await this.deps.store.reserve(record);
     return {
-      advance: toPublicAdvance(reserved.record),
+      advance: toCustomerAdvance(reserved.record),
       confirmationToken: reserved.record.state === "AUTHORIZED" ? token : null,
       idempotentReplay: !reserved.created
     };
@@ -115,13 +148,13 @@ export class UnlockdBondService {
     advanceId: string,
     token: string
   ): Promise<{
-    advance: PublicAdvance;
+    advance: CustomerAdvance;
     idempotentReplay: boolean;
   }> {
     const digest = confirmationDigest(token, this.deps.config.CONFIRMATION_SECRET);
     const begun = await this.deps.store.beginFunding(advanceId, digest, new Date());
     if (!begun.acquired) {
-      return { advance: toPublicAdvance(begun.record), idempotentReplay: true };
+      return { advance: toCustomerAdvance(begun.record), idempotentReplay: true };
     }
     try {
       const record = begun.record;
@@ -147,7 +180,7 @@ export class UnlockdBondService {
         throw new Error("HEDERA_CONSENSUS_SUCCESS_REQUIRED");
       }
       const completed = await this.deps.store.completeFunding(advanceId, result);
-      return { advance: toPublicAdvance(completed), idempotentReplay: false };
+      return { advance: toCustomerAdvance(completed), idempotentReplay: false };
     } catch (error) {
       await this.deps.store.failFunding(advanceId, safeFailureCode(error));
       throw error;
@@ -160,13 +193,14 @@ export class UnlockdBondService {
   }
 
   async readiness(): Promise<Record<string, boolean>> {
-    const [store, market, risk, payment] = await Promise.all([
+    const [store, market, companyFinancials, risk, payment] = await Promise.all([
       this.deps.store.ping(),
       this.deps.market.ready(),
+      this.deps.companyFinancials.ready(),
       this.deps.risk.ready(),
       this.deps.payment.ready()
     ]);
-    return { store, market, risk, payment };
+    return { store, market, companyFinancials, risk, payment };
   }
 
   decisionFingerprint(advance: PublicAdvance): string {

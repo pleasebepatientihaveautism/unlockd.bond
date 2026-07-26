@@ -1,14 +1,14 @@
-import type { PublicAdvance } from "../domain/public";
+import type { CustomerAdvance } from "../domain/public";
 import type { AdvanceRequest } from "../domain/schemas";
 
 interface EvaluationResponse {
-  advance: PublicAdvance;
+  advance: CustomerAdvance;
   confirmationToken: string | null;
   idempotentReplay: boolean;
 }
 
 interface FundingResponse {
-  advance: PublicAdvance;
+  advance: CustomerAdvance;
   idempotentReplay: boolean;
 }
 

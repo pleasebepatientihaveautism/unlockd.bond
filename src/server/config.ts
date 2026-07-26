@@ -36,7 +36,25 @@ const schema = z.object({
   HEDERA_MIRROR_URL: z.url().default("https://testnet.mirrornode.hedera.com"),
   PAYOUT_TINYBAR_PER_USD_MINOR: z.coerce.number().int().positive().default(10_000),
   POLICY_FIXED_CAP_MINOR: z.coerce.number().int().positive().default(200_000),
-  TREASURY_RESERVE_TINYBAR: z.coerce.number().int().positive().default(100_000_000)
+  TREASURY_RESERVE_TINYBAR: z.coerce.number().int().positive().default(100_000_000),
+  CORESIGNAL_API_KEY: optionalString,
+  CORESIGNAL_COLLECT_URL_TEMPLATE: optionalString,
+  CORESIGNAL_CACHE_DIR: z.string().min(1).default("cache/companies"),
+  CORESIGNAL_USAGE_FILE: z.string().min(1).default("api-usage.json"),
+  CORESIGNAL_MAX_CALLS: z.coerce.number().int().min(1).max(10_000).default(100),
+  CORESIGNAL_RESERVED_CALLS: z.coerce.number().int().min(0).max(9_999).default(10),
+  CORESIGNAL_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).max(31_536_000).default(604_800),
+  YAHOO_PRIVATE_MARKET_URL: z
+    .url()
+    .default("https://finance.yahoo.com/markets/private-companies/highest-valuation/"),
+  YAHOO_PRIVATE_DATA_URL: z
+    .url()
+    .default(
+      "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?count=150&formatted=true&scrIds=HIGHEST_VALUATION_PRIVATE_COMPANY&start=0&useRecordsResponse=true&fields=ticker%2Csymbol%2CcompanyName%2CregularMarketPrice%2CfiftyTwoWeekChangePercent%2ClatestImpliedValuation%2CfundingToDate%2ClatestFundingDate%2ClatestAmountRaised%2ClatestShareClass%2Csector&lang=en-US&region=US"
+    ),
+  YAHOO_PRIVATE_CACHE_FILE: z.string().min(1).default("cache/yahoo-private-market.json"),
+  YAHOO_PRIVATE_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
+  YAHOO_PRIVATE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000)
 });
 
 export type AppConfig = z.infer<typeof schema> & {
@@ -73,6 +91,15 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     const required = ["DATABASE_URL", "GRAPH_ENDPOINT", "GRAPH_API_KEY", "ZEROG_API_KEY"] as const;
     const missing = required.filter((key) => !config[key]);
     if (missing.length > 0) throw new Error(`LIVE_CONFIG_MISSING:${missing.join(",")}`);
+  }
+  if (
+    config.CORESIGNAL_COLLECT_URL_TEMPLATE &&
+    !config.CORESIGNAL_COLLECT_URL_TEMPLATE.includes("{companyIdentifier}")
+  ) {
+    throw new Error("CORESIGNAL_URL_TEMPLATE_INVALID");
+  }
+  if (config.CORESIGNAL_RESERVED_CALLS >= config.CORESIGNAL_MAX_CALLS) {
+    throw new Error("CORESIGNAL_BUDGET_INVALID");
   }
   return config;
 }
