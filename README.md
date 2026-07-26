@@ -2,8 +2,6 @@
 
 Equity-aware financing positions with auditable Hedera Testnet settlement.
 
-[unlockd.bond](https://unlockd.bond) ·
-[GitHub](https://github.com/pleasebepatientihaveautism/unlockd.bond)
 
 unlockd.bond is an ETHGlobal Lisbon prototype that turns a synthetic employee
 equity profile into a bounded Demo USDC financing position. It values vested
