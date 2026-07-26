@@ -124,6 +124,110 @@ export class PostgresAdvanceStore implements AdvanceStore {
     }));
   }
 
+  async beginRepayment(
+    advanceId: string,
+    repaymentId: string,
+    confirmationTokenHash: string
+  ): Promise<{ record: AdvanceRecord; acquired: boolean }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<
+        AdvanceRow & {
+          confirmation_token_hash: string;
+        }
+      >(
+        `SELECT record, confirmation_token_hash
+         FROM advances WHERE advance_id = $1 FOR UPDATE`,
+        [advanceId]
+      );
+      const row = result.rows[0];
+      if (!row) throw new StoreError("ADVANCE_NOT_FOUND");
+      if (row.confirmation_token_hash !== confirmationTokenHash) {
+        throw new StoreError("CONFIRMATION_TOKEN_INVALID");
+      }
+      if (row.record.state === "REPAID") {
+        if (row.record.repaymentId !== repaymentId) throw new StoreError("ADVANCE_ALREADY_REPAID");
+        await client.query("COMMIT");
+        return { record: row.record, acquired: false };
+      }
+      if (row.record.state === "REPAYMENT_PENDING") {
+        if (row.record.repaymentId !== repaymentId) {
+          throw new StoreError("REPAYMENT_ALREADY_PENDING");
+        }
+        await client.query("COMMIT");
+        return { record: row.record, acquired: false };
+      }
+      if (row.record.state === "REPAYMENT_REVIEW_REQUIRED") {
+        throw new StoreError("REPAYMENT_REVIEW_REQUIRED");
+      }
+      if (row.record.state !== "FUNDED" || !row.record.funding) {
+        throw new StoreError("ADVANCE_NOT_REPAYABLE");
+      }
+      const record: AdvanceRecord = {
+        ...row.record,
+        state: "REPAYMENT_PENDING",
+        repaymentId,
+        repayment: null,
+        repaymentProgress: null,
+        failureCode: null
+      };
+      await this.write(client, record);
+      await client.query("COMMIT");
+      return { record, acquired: true };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async recordRepaymentProgress(
+    advanceId: string,
+    progress: NonNullable<AdvanceRecord["repaymentProgress"]>
+  ): Promise<AdvanceRecord> {
+    return this.update(advanceId, (record) => {
+      if (record.state !== "REPAYMENT_PENDING") {
+        throw new StoreError("REPAYMENT_PROGRESS_NOT_ALLOWED");
+      }
+      if (record.repaymentId !== progress.repaymentId) {
+        throw new StoreError("REPAYMENT_ID_MISMATCH");
+      }
+      return { ...record, repaymentProgress: progress };
+    });
+  }
+
+  async completeRepayment(
+    advanceId: string,
+    repayment: NonNullable<AdvanceRecord["repayment"]>
+  ): Promise<AdvanceRecord> {
+    return this.update(advanceId, (record) => {
+      if (record.state !== "REPAYMENT_PENDING" || record.repaymentId !== repayment.repaymentId) {
+        throw new StoreError("REPAYMENT_COMPLETION_NOT_ALLOWED");
+      }
+      return {
+        ...record,
+        state: "REPAID",
+        repayment,
+        failureCode: null
+      };
+    });
+  }
+
+  async failRepayment(advanceId: string, failureCode: string): Promise<AdvanceRecord> {
+    return this.update(advanceId, (record) => {
+      if (record.state !== "REPAYMENT_PENDING") {
+        throw new StoreError("REPAYMENT_FAILURE_NOT_ALLOWED");
+      }
+      return {
+        ...record,
+        state: "REPAYMENT_REVIEW_REQUIRED",
+        failureCode
+      };
+    });
+  }
+
   async ping(): Promise<boolean> {
     try {
       await this.pool.query("SELECT 1");

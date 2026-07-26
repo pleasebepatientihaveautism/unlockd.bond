@@ -99,6 +99,7 @@ const payment =
         treasuryKey: liveValue(config.HEDERA_TREASURY_KEY, "HEDERA_TREASURY_KEY"),
         supplyKey: liveValue(config.HEDERA_SUPPLY_KEY, "HEDERA_SUPPLY_KEY"),
         poolId: liveValue(config.HEDERA_POOL_ID, "HEDERA_POOL_ID"),
+        poolKey: liveValue(config.HEDERA_POOL_KEY, "HEDERA_POOL_KEY"),
         topicId: liveValue(config.HEDERA_TOPIC_ID, "HEDERA_TOPIC_ID"),
         tokenId: liveValue(config.HEDERA_TOKEN_ID, "HEDERA_TOKEN_ID"),
         stableTokenId: liveValue(config.HEDERA_STABLE_TOKEN_ID, "HEDERA_STABLE_TOKEN_ID"),

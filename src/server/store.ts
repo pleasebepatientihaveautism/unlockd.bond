@@ -17,6 +17,20 @@ export interface AdvanceStore {
     progress: NonNullable<AdvanceRecord["fundingProgress"]>
   ): Promise<AdvanceRecord>;
   failFunding(advanceId: string, failureCode: string): Promise<AdvanceRecord>;
+  beginRepayment(
+    advanceId: string,
+    repaymentId: string,
+    confirmationTokenHash: string
+  ): Promise<{ record: AdvanceRecord; acquired: boolean }>;
+  recordRepaymentProgress(
+    advanceId: string,
+    progress: NonNullable<AdvanceRecord["repaymentProgress"]>
+  ): Promise<AdvanceRecord>;
+  completeRepayment(
+    advanceId: string,
+    repayment: NonNullable<AdvanceRecord["repayment"]>
+  ): Promise<AdvanceRecord>;
+  failRepayment(advanceId: string, failureCode: string): Promise<AdvanceRecord>;
   ping(): Promise<boolean>;
 }
 
@@ -78,6 +92,80 @@ export class MemoryAdvanceStore implements AdvanceStore {
 
   async failFunding(advanceId: string, failureCode: string): Promise<AdvanceRecord> {
     return this.update(advanceId, "FUNDING_FAILED", null, failureCode);
+  }
+
+  async beginRepayment(
+    advanceId: string,
+    repaymentId: string,
+    confirmationTokenHash: string
+  ): Promise<{ record: AdvanceRecord; acquired: boolean }> {
+    const record = this.records.get(advanceId);
+    if (!record) throw new StoreError("ADVANCE_NOT_FOUND");
+    if (record.confirmationTokenHash !== confirmationTokenHash) {
+      throw new StoreError("CONFIRMATION_TOKEN_INVALID");
+    }
+    if (record.state === "REPAID") {
+      if (record.repaymentId !== repaymentId) throw new StoreError("ADVANCE_ALREADY_REPAID");
+      return { record: structuredClone(record), acquired: false };
+    }
+    if (record.state === "REPAYMENT_PENDING") {
+      if (record.repaymentId !== repaymentId) throw new StoreError("REPAYMENT_ALREADY_PENDING");
+      return { record: structuredClone(record), acquired: false };
+    }
+    if (record.state === "REPAYMENT_REVIEW_REQUIRED") {
+      throw new StoreError("REPAYMENT_REVIEW_REQUIRED");
+    }
+    if (record.state !== "FUNDED" || !record.funding) {
+      throw new StoreError("ADVANCE_NOT_REPAYABLE");
+    }
+    record.state = "REPAYMENT_PENDING";
+    record.repaymentId = repaymentId;
+    record.repayment = null;
+    record.repaymentProgress = null;
+    record.failureCode = null;
+    return { record: structuredClone(record), acquired: true };
+  }
+
+  async recordRepaymentProgress(
+    advanceId: string,
+    progress: NonNullable<AdvanceRecord["repaymentProgress"]>
+  ): Promise<AdvanceRecord> {
+    const record = this.records.get(advanceId);
+    if (!record) throw new StoreError("ADVANCE_NOT_FOUND");
+    if (record.state !== "REPAYMENT_PENDING") {
+      throw new StoreError("REPAYMENT_PROGRESS_NOT_ALLOWED");
+    }
+    if (record.repaymentId !== progress.repaymentId) {
+      throw new StoreError("REPAYMENT_ID_MISMATCH");
+    }
+    record.repaymentProgress = structuredClone(progress);
+    return structuredClone(record);
+  }
+
+  async completeRepayment(
+    advanceId: string,
+    repayment: NonNullable<AdvanceRecord["repayment"]>
+  ): Promise<AdvanceRecord> {
+    const record = this.records.get(advanceId);
+    if (!record) throw new StoreError("ADVANCE_NOT_FOUND");
+    if (record.state !== "REPAYMENT_PENDING" || record.repaymentId !== repayment.repaymentId) {
+      throw new StoreError("REPAYMENT_COMPLETION_NOT_ALLOWED");
+    }
+    record.state = "REPAID";
+    record.repayment = structuredClone(repayment);
+    record.failureCode = null;
+    return structuredClone(record);
+  }
+
+  async failRepayment(advanceId: string, failureCode: string): Promise<AdvanceRecord> {
+    const record = this.records.get(advanceId);
+    if (!record) throw new StoreError("ADVANCE_NOT_FOUND");
+    if (record.state !== "REPAYMENT_PENDING") {
+      throw new StoreError("REPAYMENT_FAILURE_NOT_ALLOWED");
+    }
+    record.state = "REPAYMENT_REVIEW_REQUIRED";
+    record.failureCode = failureCode;
+    return structuredClone(record);
   }
 
   async ping(): Promise<boolean> {

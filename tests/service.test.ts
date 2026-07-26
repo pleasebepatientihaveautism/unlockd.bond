@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { RepaymentResult } from "../src/domain/schemas.js";
 import { FallbackCompanyFinancialProvider } from "../src/server/adapters/company-financials.js";
 import {
   DemoMarketProvider,
@@ -8,7 +9,9 @@ import {
 import type {
   FundingPacket,
   FundingProgressRecorder,
-  PaymentProvider
+  PaymentProvider,
+  RepaymentPacket,
+  RepaymentProgressRecorder
 } from "../src/server/adapters/types.js";
 import type { AppConfig } from "../src/server/config.js";
 import { UnlockdBondService } from "../src/server/service.js";
@@ -88,6 +91,124 @@ describe("unlockd.bond service", () => {
     expect(replay.idempotentReplay).toBe(true);
   });
 
+  it("repays full principal, retires the note, and replays the same repayment id", async () => {
+    const instance = service();
+    const evaluated = await instance.evaluate(requestFixture());
+    const confirmationToken = evaluated.confirmationToken ?? "";
+    const funded = await instance.fund(evaluated.advance.advanceId, confirmationToken);
+    expect(funded.advance.state).toBe("FUNDED");
+
+    const repaymentId = "ub_rp_service_repayment_123";
+    const repaid = await instance.repay(
+      evaluated.advance.advanceId,
+      repaymentId,
+      confirmationToken
+    );
+    expect(repaid.idempotentReplay).toBe(false);
+    expect(repaid.advance).toMatchObject({
+      state: "REPAID",
+      repaymentId,
+      repayment: {
+        version: 1,
+        repaymentId,
+        remainingPrincipalMinor: 0,
+        note: { retired: true },
+        simulated: true
+      },
+      repaymentProgress: {
+        stage: "REPAID",
+        repaymentId
+      }
+    });
+
+    const replay = await instance.repay(
+      evaluated.advance.advanceId,
+      repaymentId,
+      confirmationToken
+    );
+    expect(replay.idempotentReplay).toBe(true);
+    await expect(
+      instance.repay(
+        evaluated.advance.advanceId,
+        "ub_rp_different_repayment_456",
+        confirmationToken
+      )
+    ).rejects.toThrow("ADVANCE_ALREADY_REPAID");
+  });
+
+  it("makes a partial repayment failure terminal for automatic execution", async () => {
+    class PartiallyFailingRepaymentProvider extends DemoPaymentProvider {
+      override async repay(
+        packet: RepaymentPacket,
+        recordProgress?: RepaymentProgressRecorder
+      ): Promise<never> {
+        await recordProgress?.({
+          version: 1,
+          repaymentId: packet.repaymentId,
+          stage: "AUTHORIZED",
+          transactions: {
+            authorization: {
+              transactionId: "0.0.9750175@1785000000.000000002",
+              consensusTimestamp: "1785000002.000000002",
+              consensusStatus: "SUCCESS",
+              mirrorUrl:
+                "https://testnet.mirrornode.hedera.com/api/v1/transactions/0.0.9750175-1785000000-000000002",
+              hashscanUrl: "https://hashscan.io/testnet/transaction/1785000002.000000002"
+            }
+          },
+          authorizationSequenceNumber: "43"
+        });
+        throw new Error("HEDERA_REPAYMENT_SETTLEMENT_FAILED");
+      }
+    }
+
+    const instance = new UnlockdBondService({
+      config: testConfig(),
+      store: new MemoryAdvanceStore(),
+      market: new DemoMarketProvider(),
+      companyFinancials: new FallbackCompanyFinancialProvider(),
+      risk: new DemoRiskProvider(),
+      payment: new PartiallyFailingRepaymentProvider()
+    });
+    const evaluated = await instance.evaluate(requestFixture());
+    const token = evaluated.confirmationToken ?? "";
+    await instance.fund(evaluated.advance.advanceId, token);
+    await expect(
+      instance.repay(evaluated.advance.advanceId, "ub_rp_partial_failure_123", token)
+    ).rejects.toThrow("HEDERA_REPAYMENT_SETTLEMENT_FAILED");
+    const failed = await instance.get(evaluated.advance.advanceId);
+    expect(failed).toMatchObject({
+      state: "REPAYMENT_REVIEW_REQUIRED",
+      failureCode: "HEDERA_REPAYMENT_SETTLEMENT_FAILED",
+      repaymentProgress: {
+        stage: "AUTHORIZED",
+        authorizationSequenceNumber: "43"
+      }
+    });
+    await expect(
+      instance.repay(evaluated.advance.advanceId, "ub_rp_partial_failure_123", token)
+    ).rejects.toThrow("REPAYMENT_REVIEW_REQUIRED");
+  });
+
+  it("rejects a changed configured repayment payer", async () => {
+    const config = testConfig();
+    const instance = new UnlockdBondService({
+      config,
+      store: new MemoryAdvanceStore(),
+      market: new DemoMarketProvider(),
+      companyFinancials: new FallbackCompanyFinancialProvider(),
+      risk: new DemoRiskProvider(),
+      payment: new DemoPaymentProvider()
+    });
+    const evaluated = await instance.evaluate(requestFixture());
+    const token = evaluated.confirmationToken ?? "";
+    await instance.fund(evaluated.advance.advanceId, token);
+    config.HEDERA_RECIPIENT_ID = "0.0.999999";
+    await expect(
+      instance.repay(evaluated.advance.advanceId, "ub_rp_payer_changed_123", token)
+    ).rejects.toThrow("REPAYMENT_PAYER_CONFIG_CHANGED");
+  });
+
   it("never marks a Hedera demo funded without consensus SUCCESS", async () => {
     const config = {
       ...testConfig(),
@@ -134,6 +255,13 @@ describe("unlockd.bond service", () => {
 
       async ready(): Promise<boolean> {
         return true;
+      }
+
+      async repay(
+        _packet: RepaymentPacket,
+        _recordProgress?: RepaymentProgressRecorder
+      ): Promise<RepaymentResult> {
+        throw new Error("NOT_IMPLEMENTED");
       }
     }
 

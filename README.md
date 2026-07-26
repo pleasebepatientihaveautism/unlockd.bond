@@ -190,16 +190,20 @@ Hedera settlement:
 ```bash
 npm run dev:hedera
 npm run hedera:demo
+npm run hedera:lifecycle
 npm run hedera:verify
 ```
 
 `hedera:demo` executes a 10 Demo USDC advance to the configured recipient.
-`hedera:verify` independently checks all four transactions, the exact stable
-token transfer, NFT owner, and both HCS messages through Mirror Node. The public
-result is saved in `hedera-demo-receipt.json`.
+`hedera:lifecycle` executes the same advance and immediately repays its full
+principal. `hedera:verify` independently checks the issuance and, when present,
+all repayment transactions, exact stable-token movements, NFT retirement, and
+HCS messages through Mirror Node. The public result is saved in
+`hedera-demo-receipt.json`.
 
-`HEDERA_POOL_KEY` is used only by provisioning for token association and is not
-read by the application runtime.
+`HEDERA_POOL_KEY` authorizes returning a funded Advance Note to the treasury
+during repayment. Runtime access must therefore be limited to the bounded
+Hedera signer.
 
 The live funding adapter:
 
@@ -210,6 +214,19 @@ The live funding adapter:
 5. atomically transfers Demo USDC to the recipient and the NFT to the pool;
 6. requires a Hedera consensus `SUCCESS` receipt;
 7. commits `ADVANCE_FUNDED` to HCS.
+
+The repayment adapter:
+
+1. validates the original v2 issuance receipt, payer balance, associations, and
+   pool ownership of the expected NFT serial;
+2. commits `REPAYMENT_AUTHORIZED` to HCS;
+3. atomically returns Demo USDC from the configured payer to the treasury and
+   the Advance Note from the pool to the treasury;
+4. burns the returned Advance Note with the collection supply key;
+5. commits `ADVANCE_REPAID` to HCS and writes a versioned repayment receipt.
+
+Any repayment execution error becomes `REPAYMENT_REVIEW_REQUIRED`; the API does
+not automatically resubmit an ambiguous settlement.
 
 One USD cent maps exactly to 10,000 six-decimal Demo USDC base units. The
 application never treats the demo token as Circle-issued or as real money.
@@ -231,6 +248,20 @@ Concurrent or repeated requests do not execute a second payment.
 An ambiguous partner failure becomes terminal and requires operator
 reconciliation plus a new request/nonce; the API never automatically retries a
 payment.
+
+### Payoff and repay
+
+`GET /api/advances/:advanceId/payoff`
+
+Returns exact principal-only demo payoff terms. The current MVP has zero
+interest and zero fees.
+
+`POST /api/advances/:advanceId/repay`
+
+Requires the original opaque confirmation token. The `Idempotency-Key` header
+must equal `body.repaymentId`. The current Testnet version is custodial and can
+only debit the configured operator recipient; a borrower-controlled account
+will require wallet signing or a bounded HTS allowance.
 
 ### Public proof
 

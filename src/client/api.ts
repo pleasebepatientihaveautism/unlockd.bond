@@ -49,3 +49,15 @@ export function fundAdvance(
     body: JSON.stringify({ confirmationToken })
   });
 }
+
+export function repayAdvance(
+  advanceId: string,
+  repaymentId: string,
+  confirmationToken: string
+): Promise<FundingResponse> {
+  return request(`/api/advances/${encodeURIComponent(advanceId)}/repay`, {
+    method: "POST",
+    headers: { "Idempotency-Key": repaymentId },
+    body: JSON.stringify({ repaymentId, confirmationToken })
+  });
+}

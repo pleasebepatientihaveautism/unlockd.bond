@@ -21,7 +21,9 @@
     "hedera:provision": "tsx scripts/provision-hedera.ts",
     "dev:hedera": "DOTENV_CONFIG_PATH=.env.hedera.local tsx watch src/server/index.ts",
     "hedera:demo": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/run-hedera-demo.ts",
+    "hedera:lifecycle": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/run-hedera-demo.ts --repay",
     "hedera:verify": "tsx scripts/verify-hedera.ts",
+    "hedera:retire-orphan": "DOTENV_CONFIG_PATH=.env.hedera.local tsx scripts/retire-orphan-note.ts",
     "coresignal:configure": "tsx scripts/configure-coresignal.ts",
     "yahoo:check": "tsx scripts/check-yahoo-private-price.ts",
     "pricing:check": "tsx scripts/check-pricing.ts"

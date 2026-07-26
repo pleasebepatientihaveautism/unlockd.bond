@@ -14,6 +14,8 @@ import type {
   FundingProgressRecorder,
   MarketProvider,
   PaymentProvider,
+  RepaymentPacket,
+  RepaymentProgressRecorder,
   RiskProvider
 } from "./types.js";
 
@@ -211,6 +213,70 @@ export class DemoPaymentProvider implements PaymentProvider {
         hashscanUrl: "https://hashscan.io/testnet"
       },
       transactions,
+      simulated: true
+    };
+  }
+
+  async repay(
+    packet: RepaymentPacket,
+    recordProgress?: RepaymentProgressRecorder
+  ): Promise<import("../../domain/schemas.js").RepaymentResult> {
+    const baseTimestamp = Math.floor(Date.now() / 1000);
+    const simulatedTransaction = (stage: string) => ({
+      transactionId: `simulated:${stage}:${digest(packet.repaymentId).slice(0, 16)}`,
+      consensusTimestamp: new Date().toISOString(),
+      consensusStatus: "SIMULATED" as const,
+      mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+      hashscanUrl: "https://hashscan.io/testnet"
+    });
+    const authorizationSequenceNumber = String(baseTimestamp);
+    const repaidSequenceNumber = String(baseTimestamp + 1);
+    const transactions = {
+      authorization: simulatedTransaction("repayment-authorization"),
+      settlement: simulatedTransaction("repayment-settlement"),
+      noteBurn: simulatedTransaction("note-burn"),
+      repaidEvent: simulatedTransaction("repaid-event")
+    };
+    await recordProgress?.({
+      version: 1,
+      repaymentId: packet.repaymentId,
+      stage: "REPAID",
+      transactions,
+      authorizationSequenceNumber,
+      repaidSequenceNumber
+    });
+    return {
+      version: 1,
+      repaymentId: packet.repaymentId,
+      advanceId: packet.advanceId,
+      payerAccountId: packet.payerAccountId,
+      treasuryAccountId: "0.0.789010",
+      asset: {
+        tokenId: "0.0.789011",
+        name: "USDC DEMO",
+        symbol: "USDC",
+        decimals: 6,
+        amountUnits: packet.amountStableUnits.toString(),
+        amountMinor: packet.amountMinor,
+        label: "Demo USDC — no real value",
+        mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      note: {
+        tokenId: packet.noteTokenId,
+        serial: packet.noteSerial,
+        retired: true,
+        mirrorUrl: "https://testnet.mirrornode.hedera.com/",
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      topic: {
+        topicId: "0.0.567890",
+        authorizationSequenceNumber,
+        repaidSequenceNumber,
+        hashscanUrl: "https://hashscan.io/testnet"
+      },
+      transactions,
+      remainingPrincipalMinor: 0,
       simulated: true
     };
   }

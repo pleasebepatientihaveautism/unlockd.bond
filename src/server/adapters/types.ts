@@ -6,6 +6,8 @@ import type {
   FundingResult,
   MarketSnapshot,
   PrivateCompanyListing,
+  RepaymentProgress,
+  RepaymentResult,
   RiskDecision,
   RiskReceipt
 } from "../../domain/schemas.js";
@@ -47,8 +49,25 @@ export interface FundingPacket {
 
 export type FundingProgressRecorder = (progress: FundingProgress) => Promise<void>;
 
+export interface RepaymentPacket {
+  repaymentId: string;
+  advanceId: string;
+  payerAccountId: string;
+  amountMinor: number;
+  amountStableUnits: bigint;
+  noteTokenId: string;
+  noteSerial: string;
+  issuanceSettlementTransactionId: string;
+}
+
+export type RepaymentProgressRecorder = (progress: RepaymentProgress) => Promise<void>;
+
 export interface PaymentProvider {
   fund(packet: FundingPacket, recordProgress?: FundingProgressRecorder): Promise<FundingResult>;
+  repay(
+    packet: RepaymentPacket,
+    recordProgress?: RepaymentProgressRecorder
+  ): Promise<RepaymentResult>;
   ready(): Promise<boolean>;
 }
 

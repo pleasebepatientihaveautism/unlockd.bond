@@ -4,6 +4,7 @@ import {
   AccountId,
   Client,
   PrivateKey,
+  TokenBurnTransaction,
   TokenId,
   TokenMintTransaction,
   TopicId,
@@ -15,12 +16,17 @@ import {
   type FundingProgress,
   type FundingResult,
   type FundingTransaction,
-  fundingResultSchema
+  fundingResultSchema,
+  type RepaymentProgress,
+  type RepaymentResult,
+  repaymentResultSchema
 } from "../../domain/schemas.js";
 import {
   type FundingPacket,
   type FundingProgressRecorder,
   type PaymentProvider,
+  type RepaymentPacket,
+  type RepaymentProgressRecorder,
   STABLE_TOKEN_DECIMALS,
   usdMinorToStableUnits
 } from "./types.js";
@@ -32,6 +38,7 @@ export interface HederaConfig {
   treasuryKey: string;
   supplyKey: string;
   poolId: string;
+  poolKey: string;
   topicId: string;
   tokenId: string;
   stableTokenId: string;
@@ -55,6 +62,15 @@ interface MirrorToken {
 interface MirrorTokenRelationships {
   tokens?: Array<{ token_id: string }>;
 }
+
+interface MirrorNft {
+  account_id: string | null;
+  deleted: boolean;
+  serial_number: number;
+  token_id: string;
+}
+
+const MIN_OPERATOR_HBAR_TINYBAR = 20_000_000n;
 
 function privateKey(value: string): PrivateKey {
   try {
@@ -116,6 +132,7 @@ export class HederaPaymentProvider implements PaymentProvider {
   private readonly stableTokenId: TokenId;
   private readonly treasuryKey: PrivateKey;
   private readonly supplyKey: PrivateKey;
+  private readonly poolKey: PrivateKey;
 
   constructor(private readonly config: HederaConfig) {
     this.operatorId = AccountId.fromString(config.operatorId);
@@ -126,6 +143,7 @@ export class HederaPaymentProvider implements PaymentProvider {
     this.stableTokenId = TokenId.fromString(config.stableTokenId);
     this.treasuryKey = privateKey(config.treasuryKey);
     this.supplyKey = privateKey(config.supplyKey);
+    this.poolKey = privateKey(config.poolKey);
     this.client = Client.forTestnet().setOperator(this.operatorId, privateKey(config.operatorKey));
   }
 
@@ -316,6 +334,205 @@ export class HederaPaymentProvider implements PaymentProvider {
     });
   }
 
+  async repay(
+    packet: RepaymentPacket,
+    recordProgress?: RepaymentProgressRecorder
+  ): Promise<RepaymentResult> {
+    if (packet.amountStableUnits !== usdMinorToStableUnits(packet.amountMinor)) {
+      throw new Error("STABLE_AMOUNT_MISMATCH");
+    }
+    if (packet.noteTokenId !== this.tokenId.toString()) {
+      throw new Error("REPAYMENT_NOTE_TOKEN_MISMATCH");
+    }
+    if (packet.payerAccountId !== this.config.recipientId) {
+      throw new Error("REPAYMENT_PAYER_CONFIG_CHANGED");
+    }
+    if (packet.payerAccountId !== this.operatorId.toString()) {
+      throw new Error("REPAYMENT_SIGNER_UNAVAILABLE");
+    }
+    const payer = AccountId.fromString(packet.payerAccountId);
+    const serialNumber = Number(packet.noteSerial);
+    if (!Number.isSafeInteger(serialNumber) || serialNumber <= 0) {
+      throw new Error("REPAYMENT_NOTE_SERIAL_INVALID");
+    }
+    await this.assertRepaymentReady(payer, packet.amountStableUnits, serialNumber);
+
+    const transactions: RepaymentProgress["transactions"] = {};
+    const authorizationEvent = {
+      v: 1,
+      event: "REPAYMENT_AUTHORIZED",
+      repaymentId: packet.repaymentId,
+      advanceId: packet.advanceId,
+      payerAccountId: payer.toString(),
+      repayment: {
+        tokenId: this.stableTokenId.toString(),
+        symbol: "USDC",
+        decimals: STABLE_TOKEN_DECIMALS,
+        amountUnits: packet.amountStableUnits.toString(),
+        amountMinor: packet.amountMinor
+      },
+      note: `${this.tokenId.toString()}/${packet.noteSerial}`,
+      issuanceSettlementTxId: packet.issuanceSettlementTransactionId
+    };
+    const authorization = await new TopicMessageSubmitTransaction()
+      .setTopicId(this.topicId)
+      .setMessage(JSON.stringify(authorizationEvent))
+      .execute(this.client);
+    const authorizationReceipt = await authorization.getReceipt(this.client);
+    if (authorizationReceipt.status.toString() !== "SUCCESS") {
+      throw new Error("HCS_REPAYMENT_AUTHORIZATION_FAILED");
+    }
+    const authorizationSequenceNumber = authorizationReceipt.topicSequenceNumber?.toString();
+    if (!authorizationSequenceNumber) {
+      throw new Error("HCS_REPAYMENT_AUTHORIZATION_SEQUENCE_MISSING");
+    }
+    transactions.authorization = await transactionEvidence(
+      authorization,
+      this.client,
+      this.config.mirrorUrl,
+      "SUCCESS"
+    );
+    await recordProgress?.({
+      version: 1,
+      repaymentId: packet.repaymentId,
+      stage: "AUTHORIZED",
+      transactions: { ...transactions },
+      authorizationSequenceNumber
+    });
+
+    const transfer = await new TransferTransaction()
+      .addTokenTransfer(this.stableTokenId, payer, -packet.amountStableUnits)
+      .addTokenTransfer(this.stableTokenId, this.treasuryId, packet.amountStableUnits)
+      .addNftTransfer(this.tokenId, serialNumber, this.poolId, this.treasuryId)
+      .setTransactionMemo(`unlockd.bond repay ${packet.advanceId}`.slice(0, 100))
+      .freezeWith(this.client);
+    const poolSigned =
+      this.poolId.toString() === this.operatorId.toString()
+        ? transfer
+        : await transfer.sign(this.poolKey);
+    const settlement = await poolSigned.execute(this.client);
+    const settlementReceipt = await settlement.getReceipt(this.client);
+    if (settlementReceipt.status.toString() !== "SUCCESS") {
+      throw new Error("HEDERA_REPAYMENT_SETTLEMENT_FAILED");
+    }
+    transactions.settlement = await transactionEvidence(
+      settlement,
+      this.client,
+      this.config.mirrorUrl,
+      "SUCCESS"
+    );
+    await recordProgress?.({
+      version: 1,
+      repaymentId: packet.repaymentId,
+      stage: "SETTLED",
+      transactions: { ...transactions },
+      authorizationSequenceNumber
+    });
+
+    const burn = await (
+      await new TokenBurnTransaction()
+        .setTokenId(this.tokenId)
+        .setSerials([serialNumber])
+        .freezeWith(this.client)
+        .sign(this.supplyKey)
+    ).execute(this.client);
+    const burnReceipt = await burn.getReceipt(this.client);
+    if (burnReceipt.status.toString() !== "SUCCESS") {
+      throw new Error("HEDERA_NOTE_BURN_FAILED");
+    }
+    transactions.noteBurn = await transactionEvidence(
+      burn,
+      this.client,
+      this.config.mirrorUrl,
+      "SUCCESS"
+    );
+    await recordProgress?.({
+      version: 1,
+      repaymentId: packet.repaymentId,
+      stage: "NOTE_RETIRED",
+      transactions: { ...transactions },
+      authorizationSequenceNumber
+    });
+
+    const repaidEvent = {
+      v: 1,
+      event: "ADVANCE_REPAID",
+      repaymentId: packet.repaymentId,
+      advanceId: packet.advanceId,
+      repayment: {
+        tokenId: this.stableTokenId.toString(),
+        amountUnits: packet.amountStableUnits.toString()
+      },
+      note: `${this.tokenId.toString()}/${packet.noteSerial}`,
+      repaymentAuthorizationTxId: transactions.authorization.transactionId,
+      settlementTxId: transactions.settlement.transactionId,
+      noteBurnTxId: transactions.noteBurn.transactionId,
+      remainingPrincipalUnits: "0"
+    };
+    const repaid = await new TopicMessageSubmitTransaction()
+      .setTopicId(this.topicId)
+      .setMessage(JSON.stringify(repaidEvent))
+      .execute(this.client);
+    const repaidReceipt = await repaid.getReceipt(this.client);
+    if (repaidReceipt.status.toString() !== "SUCCESS") {
+      throw new Error("HCS_REPAID_EVENT_FAILED");
+    }
+    const repaidSequenceNumber = repaidReceipt.topicSequenceNumber?.toString();
+    if (!repaidSequenceNumber) throw new Error("HCS_REPAID_SEQUENCE_MISSING");
+    transactions.repaidEvent = await transactionEvidence(
+      repaid,
+      this.client,
+      this.config.mirrorUrl,
+      "SUCCESS"
+    );
+    await recordProgress?.({
+      version: 1,
+      repaymentId: packet.repaymentId,
+      stage: "REPAID",
+      transactions: { ...transactions },
+      authorizationSequenceNumber,
+      repaidSequenceNumber
+    });
+
+    const stableTokenId = this.stableTokenId.toString();
+    const noteTokenId = this.tokenId.toString();
+    const topicId = this.topicId.toString();
+    return repaymentResultSchema.parse({
+      version: 1,
+      repaymentId: packet.repaymentId,
+      advanceId: packet.advanceId,
+      payerAccountId: payer.toString(),
+      treasuryAccountId: this.treasuryId.toString(),
+      asset: {
+        tokenId: stableTokenId,
+        name: "USDC DEMO",
+        symbol: "USDC",
+        decimals: STABLE_TOKEN_DECIMALS,
+        amountUnits: packet.amountStableUnits.toString(),
+        amountMinor: packet.amountMinor,
+        label: "Demo USDC — no real value",
+        mirrorUrl: `${this.config.mirrorUrl}/api/v1/tokens/${stableTokenId}`,
+        hashscanUrl: `https://hashscan.io/testnet/token/${stableTokenId}`
+      },
+      note: {
+        tokenId: noteTokenId,
+        serial: packet.noteSerial,
+        retired: true,
+        mirrorUrl: `${this.config.mirrorUrl}/api/v1/tokens/${noteTokenId}/nfts/${packet.noteSerial}`,
+        hashscanUrl: `https://hashscan.io/testnet/token/${noteTokenId}/${packet.noteSerial}`
+      },
+      topic: {
+        topicId,
+        authorizationSequenceNumber,
+        repaidSequenceNumber,
+        hashscanUrl: `https://hashscan.io/testnet/topic/${topicId}`
+      },
+      transactions,
+      remainingPrincipalMinor: 0,
+      simulated: false
+    });
+  }
+
   async ready(): Promise<boolean> {
     try {
       const reserve = BigInt(this.config.treasuryStableReserveMinor) * 10_000n;
@@ -351,7 +568,9 @@ export class HederaPaymentProvider implements PaymentProvider {
         `/api/v1/topics/${this.topicId.toString()}/messages?limit=1`
       )
     ]);
-    if (operatorBalance.hbars.toTinybars().isZero()) throw new Error("OPERATOR_HBAR_REQUIRED");
+    if (BigInt(operatorBalance.hbars.toTinybars().toString()) < MIN_OPERATOR_HBAR_TINYBAR) {
+      throw new Error("OPERATOR_HBAR_RESERVE_REQUIRED");
+    }
     if (
       stableToken.deleted ||
       stableToken.token_id !== this.stableTokenId.toString() ||
@@ -376,6 +595,38 @@ export class HederaPaymentProvider implements PaymentProvider {
     if (!poolAssociated) throw new Error("POOL_NOTE_ASSOCIATION_REQUIRED");
     const available = BigInt(treasuryBalance.tokens?.get(this.stableTokenId)?.toString() ?? "0");
     if (available - amount < reserve) throw new Error("TREASURY_STABLE_RESERVE_REQUIRED");
+  }
+
+  private async assertRepaymentReady(
+    payer: AccountId,
+    amount: bigint,
+    serialNumber: number
+  ): Promise<void> {
+    const [operatorBalance, payerBalance, payerAssociated, treasuryAssociated, note] =
+      await Promise.all([
+        new AccountBalanceQuery().setAccountId(this.operatorId).execute(this.client),
+        new AccountBalanceQuery().setAccountId(payer).execute(this.client),
+        this.isAssociated(payer, this.stableTokenId),
+        this.isAssociated(this.treasuryId, this.stableTokenId),
+        this.mirrorJson<MirrorNft>(`/api/v1/tokens/${this.tokenId.toString()}/nfts/${serialNumber}`)
+      ]);
+    if (BigInt(operatorBalance.hbars.toTinybars().toString()) < MIN_OPERATOR_HBAR_TINYBAR) {
+      throw new Error("OPERATOR_HBAR_RESERVE_REQUIRED");
+    }
+    if (!payerAssociated) throw new Error("REPAYMENT_PAYER_STABLE_ASSOCIATION_REQUIRED");
+    if (!treasuryAssociated) throw new Error("TREASURY_STABLE_ASSOCIATION_REQUIRED");
+    const payerStableBalance = BigInt(
+      payerBalance.tokens?.get(this.stableTokenId)?.toString() ?? "0"
+    );
+    if (payerStableBalance < amount) throw new Error("REPAYMENT_STABLE_BALANCE_REQUIRED");
+    if (
+      note.deleted ||
+      note.token_id !== this.tokenId.toString() ||
+      note.serial_number !== serialNumber ||
+      note.account_id !== this.poolId.toString()
+    ) {
+      throw new Error("POOL_NOTE_OWNERSHIP_REQUIRED");
+    }
   }
 
   private async isAssociated(accountId: AccountId, tokenId: TokenId): Promise<boolean> {

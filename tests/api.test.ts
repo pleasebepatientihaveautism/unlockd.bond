@@ -91,6 +91,70 @@ describe("HTTP API", () => {
       .send({ confirmationToken: evaluated.body.confirmationToken })
       .expect(200);
     expect(funded.body.advance.state).toBe("FUNDED");
+    const payoff = await request(server)
+      .get(`/api/advances/${evaluated.body.advance.advanceId}/payoff`)
+      .expect(200);
+    expect(payoff.body.payoff).toMatchObject({
+      principalMinor: input.request.amountMinor,
+      interestMinor: 0,
+      feesMinor: 0,
+      totalMinor: input.request.amountMinor,
+      amountUnits: String(input.request.amountMinor * 10_000)
+    });
+  });
+
+  it("repays a funded advance with a matching idempotency key", async () => {
+    const server = app();
+    const input = requestFixture();
+    const evaluated = await request(server)
+      .post("/api/advances/evaluate")
+      .set("Idempotency-Key", input.requestId)
+      .send(input)
+      .expect(201);
+    await request(server)
+      .post(`/api/advances/${evaluated.body.advance.advanceId}/fund`)
+      .send({ confirmationToken: evaluated.body.confirmationToken })
+      .expect(200);
+
+    const repaymentId = "ub_rp_api_repayment_123";
+    const repaid = await request(server)
+      .post(`/api/advances/${evaluated.body.advance.advanceId}/repay`)
+      .set("Idempotency-Key", repaymentId)
+      .send({
+        repaymentId,
+        confirmationToken: evaluated.body.confirmationToken
+      })
+      .expect(200);
+    expect(repaid.body.advance).toMatchObject({
+      state: "REPAID",
+      repaymentId,
+      repayment: {
+        repaymentId,
+        remainingPrincipalMinor: 0,
+        note: { retired: true }
+      }
+    });
+
+    const replay = await request(server)
+      .post(`/api/advances/${evaluated.body.advance.advanceId}/repay`)
+      .set("Idempotency-Key", repaymentId)
+      .send({
+        repaymentId,
+        confirmationToken: evaluated.body.confirmationToken
+      })
+      .expect(200);
+    expect(replay.body.idempotentReplay).toBe(true);
+  });
+
+  it("rejects a repayment idempotency mismatch", async () => {
+    await request(app())
+      .post("/api/advances/ub_missing_12345678/repay")
+      .set("Idempotency-Key", "ub_rp_header_12345678")
+      .send({
+        repaymentId: "ub_rp_body_12345678",
+        confirmationToken: "x".repeat(32)
+      })
+      .expect(422, { error: "IDEMPOTENCY_KEY_MISMATCH" });
   });
 
   it("rejects an untrusted mutation origin", async () => {

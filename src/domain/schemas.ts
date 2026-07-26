@@ -33,7 +33,15 @@ export const advanceRequestSchema = z
     request: z.object({
       amountMinor: positiveMinor,
       currency: z.literal("USD"),
-      termDays: z.union([z.literal(14), z.literal(30), z.literal(45)])
+      termDays: z.union([
+        z.literal(14),
+        z.literal(30),
+        z.literal(45),
+        z.literal(90),
+        z.literal(180),
+        z.literal(365),
+        z.literal(3650)
+      ])
     })
   })
   .strict()
@@ -258,6 +266,74 @@ export const fundingResultV2Schema = z
 
 export const fundingResultSchema = z.union([fundingResultV2Schema, fundingResultV1Schema]);
 
+export const repaymentProgressSchema = z
+  .object({
+    version: z.literal(1),
+    repaymentId: z.string().regex(/^ub_rp_[a-zA-Z0-9_-]{8,80}$/),
+    stage: z.enum(["AUTHORIZED", "SETTLED", "NOTE_RETIRED", "REPAID"]),
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema.optional(),
+        settlement: fundingTransactionSchema.optional(),
+        noteBurn: fundingTransactionSchema.optional(),
+        repaidEvent: fundingTransactionSchema.optional()
+      })
+      .strict(),
+    authorizationSequenceNumber: z.string().regex(/^\d+$/).optional(),
+    repaidSequenceNumber: z.string().regex(/^\d+$/).optional()
+  })
+  .strict();
+
+export const repaymentResultSchema = z
+  .object({
+    version: z.literal(1),
+    repaymentId: z.string().regex(/^ub_rp_[a-zA-Z0-9_-]{8,80}$/),
+    advanceId: z.string().regex(/^ub_[a-zA-Z0-9_-]{8,80}$/),
+    payerAccountId: z.string().regex(/^0\.0\.\d{3,12}$/),
+    treasuryAccountId: z.string().regex(/^0\.0\.\d{3,12}$/),
+    asset: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        name: z.literal("USDC DEMO"),
+        symbol: z.literal("USDC"),
+        decimals: z.literal(6),
+        amountUnits: z.string().regex(/^[1-9]\d*$/),
+        amountMinor: positiveMinor,
+        label: z.literal("Demo USDC — no real value"),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    note: z
+      .object({
+        tokenId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        serial: z.string().regex(/^\d+$/),
+        retired: z.literal(true),
+        mirrorUrl: z.string().url(),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    topic: z
+      .object({
+        topicId: z.string().regex(/^0\.0\.\d{3,12}$/),
+        authorizationSequenceNumber: z.string().regex(/^\d+$/),
+        repaidSequenceNumber: z.string().regex(/^\d+$/),
+        hashscanUrl: z.string().url()
+      })
+      .strict(),
+    transactions: z
+      .object({
+        authorization: fundingTransactionSchema,
+        settlement: fundingTransactionSchema,
+        noteBurn: fundingTransactionSchema,
+        repaidEvent: fundingTransactionSchema
+      })
+      .strict(),
+    remainingPrincipalMinor: z.literal(0),
+    simulated: z.boolean()
+  })
+  .strict();
+
 export type AdvanceRequest = z.infer<typeof advanceRequestSchema>;
 export type AssetSymbol = z.infer<typeof assetSymbolSchema>;
 export type MarketSnapshot = z.infer<typeof marketSnapshotSchema>;
@@ -267,10 +343,19 @@ export type FundingResult = z.infer<typeof fundingResultSchema>;
 export type FundingResultV2 = z.infer<typeof fundingResultV2Schema>;
 export type FundingProgress = z.infer<typeof fundingProgressSchema>;
 export type FundingTransaction = z.infer<typeof fundingTransactionSchema>;
+export type RepaymentProgress = z.infer<typeof repaymentProgressSchema>;
+export type RepaymentResult = z.infer<typeof repaymentResultSchema>;
 export type PrivateCompanyListing = z.infer<typeof privateCompanyListingSchema>;
 
 export const confirmationSchema = z
   .object({
+    confirmationToken: z.string().min(32).max(300)
+  })
+  .strict();
+
+export const repaymentRequestSchema = z
+  .object({
+    repaymentId: z.string().regex(/^ub_rp_[a-zA-Z0-9_-]{8,80}$/),
     confirmationToken: z.string().min(32).max(300)
   })
   .strict();

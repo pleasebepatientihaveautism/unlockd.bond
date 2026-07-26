@@ -4,11 +4,21 @@ import type {
   FundingProgress,
   FundingResult,
   MarketSnapshot,
+  RepaymentProgress,
+  RepaymentResult,
   RiskDecision,
   RiskReceipt
 } from "./schemas.js";
 
-export type AdvanceState = "AUTHORIZED" | "FUNDING" | "FUNDED" | "FUNDING_FAILED" | "REJECTED";
+export type AdvanceState =
+  | "AUTHORIZED"
+  | "FUNDING"
+  | "FUNDED"
+  | "FUNDING_FAILED"
+  | "REPAYMENT_PENDING"
+  | "REPAYMENT_REVIEW_REQUIRED"
+  | "REPAID"
+  | "REJECTED";
 
 export interface AdvanceRecord {
   advanceId: string;
@@ -35,6 +45,9 @@ export interface AdvanceRecord {
   authorization: Authorization;
   funding: FundingResult | null;
   fundingProgress: FundingProgress | null;
+  repayment: RepaymentResult | null;
+  repaymentProgress: RepaymentProgress | null;
+  repaymentId: string | null;
   failureCode: string | null;
 }
 

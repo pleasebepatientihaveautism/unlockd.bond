@@ -330,7 +330,7 @@ button {
   flex-wrap: wrap;
 }
 
-.quick-actions a {
+.quick-actions button {
   min-height: 43px;
   padding: 0 15px;
   display: inline-flex;
@@ -341,10 +341,10 @@ button {
   background: #ffffff;
   color: var(--ink);
   font-size: 13px;
-  text-decoration: none;
+  cursor: pointer;
 }
 
-.quick-actions a:hover {
+.quick-actions button:hover {
   border-color: rgba(18, 44, 69, 0.42);
   background: var(--surface-quiet);
 }
@@ -356,7 +356,7 @@ button {
 #overview,
 #equity,
 #advance,
-#evidence,
+#review,
 #receipt {
   scroll-margin-top: 104px;
 }
@@ -657,6 +657,10 @@ button {
   color: var(--navy);
 }
 
+.grant-type-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .profile-actions {
   margin-top: 24px;
   padding-top: 18px;
@@ -712,7 +716,7 @@ button {
   color: var(--green);
 }
 
-.profile-complete > a {
+.profile-continue {
   min-height: 40px;
   padding: 0 14px;
   display: inline-flex;
@@ -722,7 +726,7 @@ button {
   background: var(--navy);
   color: #ffffff;
   font-size: 11px;
-  text-decoration: none;
+  cursor: pointer;
 }
 
 .verification-grid {
@@ -897,12 +901,17 @@ button {
 }
 
 .total-card > strong,
+.share-price-card > strong,
 .readiness-card > strong {
   display: inline-block;
   margin-top: 16px;
   font-size: 35px;
   font-weight: 400;
   letter-spacing: -0.04em;
+}
+
+.share-price-card > strong {
+  font-size: 30px;
 }
 
 .metric-unit {
@@ -1002,11 +1011,17 @@ button {
   background: var(--green);
 }
 
-.readiness-card a {
+.readiness-card button {
   margin-top: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--navy);
   font-size: 12px;
+  text-align: left;
+  text-decoration: underline;
   text-underline-offset: 3px;
+  cursor: pointer;
 }
 
 .private-model {
@@ -1085,7 +1100,7 @@ button {
   margin: 0 0 18px;
   padding: 18px 22px;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -1156,6 +1171,10 @@ button {
   grid-template-columns: minmax(0, 1.08fr) minmax(370px, 0.92fr);
   align-items: start;
   gap: 18px;
+}
+
+.flow-grid.is-single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .panel {
@@ -1613,6 +1632,64 @@ dd {
   text-align: center;
 }
 
+.repayment-panel {
+  border-color: #c8d8e8;
+  background: #f4f8fb;
+}
+
+.funding-error {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid #e7b9b9;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #7d2525;
+}
+
+.funding-error strong {
+  font-size: 12px;
+}
+
+.funding-error p {
+  margin: 5px 0 10px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.funding-error button {
+  border: 1px solid #b44a4a;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #7d2525;
+}
+
+.repayment-panel .approval-icon {
+  background: var(--navy);
+}
+
+.repayment-panel .approval-heading span {
+  color: var(--navy);
+}
+
+.repayment-panel.is-repaid {
+  border-color: #c8dfd3;
+  background: var(--green-soft);
+}
+
+.repayment-panel.is-repaid .approval-icon {
+  background: var(--green);
+}
+
+.repayment-receipt {
+  grid-column: 1 / -1;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.repayment-receipt .receipt-data {
+  margin-top: 14px;
+}
+
 .receipt {
   margin-top: 18px;
 }
@@ -1892,7 +1969,7 @@ footer {
     padding: 22px;
   }
 
-  .profile-complete > a {
+  .profile-continue {
     grid-column: 2;
     justify-self: start;
   }
@@ -2004,11 +2081,11 @@ footer {
     grid-template-columns: 1fr 1fr;
   }
 
-  .quick-actions a {
+  .quick-actions button {
     justify-content: center;
   }
 
-  .quick-actions a:first-child {
+  .quick-actions button:first-child {
     grid-column: 1 / -1;
   }
 

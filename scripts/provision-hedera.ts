@@ -24,6 +24,8 @@ const mirrorUrl = "https://testnet.mirrornode.hedera.com";
 const hashscanUrl = "https://hashscan.io/testnet";
 const stableInitialSupply = 1_000_000_000_000_000n;
 const stableCreationOperatorTargetTinybar = 1_620_000_000n;
+const operationalOperatorTargetTinybar = 40_000_000n;
+const operationalTreasuryReserveTinybar = 50_000_000n;
 const operatorIdText = process.env.HEDERA_OPERATOR_ID ?? "0.0.9750175";
 const state: Record<string, string> = existsSync(envPath)
   ? parse(readFileSync(envPath, "utf8"))
@@ -211,7 +213,7 @@ if (account.deleted || account.account !== operatorIdText || !account.key) {
 }
 const plannedInitialBalance =
   (state.HEDERA_TREASURY_ID ? 0 : 300_000_000) + (state.HEDERA_POOL_ID ? 0 : 100_000_000);
-if (account.balance.balance < plannedInitialBalance + 150_000_000) {
+if (plannedInitialBalance > 0 && account.balance.balance < plannedInitialBalance + 150_000_000) {
   throw new Error("OPERATOR_BALANCE_TOO_LOW_FOR_REMAINING_PROVISIONING");
 }
 const key = await operatorKey(account);
@@ -272,6 +274,41 @@ try {
       "unlockd.bond Testnet pool"
     );
     persistEnv();
+  }
+  const [currentOperator, currentTreasury, currentPool] = await Promise.all([
+    mirrorAccount(operatorIdText),
+    mirrorAccount(state.HEDERA_TREASURY_ID),
+    mirrorAccount(state.HEDERA_POOL_ID)
+  ]);
+  const operatorTinybar = BigInt(currentOperator.balance.balance);
+  const treasuryTinybar = BigInt(currentTreasury.balance.balance);
+  if (operatorTinybar < operationalOperatorTargetTinybar) {
+    const transferTinybar = operationalOperatorTargetTinybar - operatorTinybar;
+    const poolTinybar = BigInt(currentPool.balance.balance);
+    const treasuryAvailable = treasuryTinybar - operationalTreasuryReserveTinybar;
+    const poolAvailable = poolTinybar - operationalTreasuryReserveTinybar;
+    const useTreasury = treasuryAvailable >= transferTinybar;
+    const usePool = !useTreasury && poolAvailable >= transferTinybar;
+    if (!useTreasury && !usePool) {
+      throw new Error("TREASURY_HBAR_RESERVE_REQUIRED");
+    }
+    const donorId = useTreasury ? state.HEDERA_TREASURY_ID : state.HEDERA_POOL_ID;
+    const donorKey = useTreasury ? treasuryKey : poolKey;
+    process.stdout.write("Rebalancing operational Testnet HBAR to fee payer...\n");
+    const treasuryClient = Client.forTestnet().setOperator(AccountId.fromString(donorId), donorKey);
+    try {
+      const transaction = await new TransferTransaction()
+        .addHbarTransfer(AccountId.fromString(donorId), Hbar.fromTinybars(-transferTinybar))
+        .addHbarTransfer(AccountId.fromString(operatorIdText), Hbar.fromTinybars(transferTinybar))
+        .setTransactionMemo("unlockd.bond operational fee balance")
+        .execute(treasuryClient);
+      const receipt = await transaction.getReceipt(treasuryClient);
+      if (receipt.status.toString() !== "SUCCESS") {
+        throw new Error("OPERATOR_FEE_REBALANCE_FAILED");
+      }
+    } finally {
+      treasuryClient.close();
+    }
   }
   if (!state.HEDERA_TOPIC_ID) {
     process.stdout.write("Creating HCS lifecycle topic...\n");

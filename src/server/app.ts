@@ -6,7 +6,11 @@ import helmet from "helmet";
 import type { Logger } from "pino";
 import { ZodError } from "zod";
 import { PolicyError } from "../domain/policy.js";
-import { advanceRequestSchema, confirmationSchema } from "../domain/schemas.js";
+import {
+  advanceRequestSchema,
+  confirmationSchema,
+  repaymentRequestSchema
+} from "../domain/schemas.js";
 import type { AppConfig } from "./config.js";
 import type { UnlockdBondService } from "./service.js";
 import { StoreError } from "./store.js";
@@ -28,9 +32,19 @@ function errorCode(error: unknown): string {
 
 function statusFor(code: string): number {
   if (code === "ADVANCE_NOT_FOUND") return 404;
+  if (code.includes("HBAR") || code.includes("PAYER_BALANCE")) return 503;
   if (code.includes("TOKEN") || code === "ORIGIN_NOT_ALLOWED") return 403;
   if (code.includes("FUNDING") || code.includes("PARTNER") || code.includes("ZEROG")) return 502;
-  if (code.includes("EXPIRED") || code.includes("NOT_FUNDABLE")) return 409;
+  if (
+    code.includes("EXPIRED") ||
+    code.includes("NOT_FUNDABLE") ||
+    code.includes("NOT_REPAYABLE") ||
+    code.includes("ALREADY") ||
+    code.includes("REPAYMENT_REVIEW")
+  ) {
+    return 409;
+  }
+  if (code.includes("REPAYMENT") || code.includes("NOTE_BURN")) return 502;
   return 422;
 }
 
@@ -147,6 +161,23 @@ export function createApp(deps: AppDependencies) {
     );
   });
 
+  app.post("/api/advances/:advanceId/repay", async (request, response) => {
+    const input = repaymentRequestSchema.parse(request.body);
+    const idempotencyKey = request.header("idempotency-key");
+    if (!idempotencyKey || idempotencyKey !== input.repaymentId) {
+      response.status(422).json({ error: "IDEMPOTENCY_KEY_MISMATCH" });
+      return;
+    }
+    response.setHeader("cache-control", "no-store");
+    response.json(
+      await deps.service.repay(
+        String(request.params.advanceId),
+        input.repaymentId,
+        input.confirmationToken
+      )
+    );
+  });
+
   app.get("/api/advances/:advanceId", async (request, response) => {
     const advance = await deps.service.get(String(request.params.advanceId));
     if (!advance) {
@@ -155,6 +186,11 @@ export function createApp(deps: AppDependencies) {
     }
     response.setHeader("cache-control", "public, max-age=10");
     response.json({ advance });
+  });
+
+  app.get("/api/advances/:advanceId/payoff", async (request, response) => {
+    response.setHeader("cache-control", "no-store");
+    response.json({ payoff: await deps.service.payoff(String(request.params.advanceId)) });
   });
 
   if (deps.config.NODE_ENV === "production") {

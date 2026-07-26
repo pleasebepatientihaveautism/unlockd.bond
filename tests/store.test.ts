@@ -26,6 +26,9 @@ const record = {
   authorization: { amountMinor: 1000 },
   funding: null,
   fundingProgress: null,
+  repayment: null,
+  repaymentProgress: null,
+  repaymentId: null,
   failureCode: null
 } as unknown as AdvanceRecord;
 
@@ -69,5 +72,30 @@ describe("advance store", () => {
     await expect(store.beginFunding(record.advanceId, "token-hash", new Date())).rejects.toThrow(
       "ADVANCE_NOT_FUNDABLE"
     );
+  });
+
+  it("acquires one repayment id and blocks competing repayment attempts", async () => {
+    const store = new MemoryAdvanceStore();
+    await store.reserve({ ...record, state: "FUNDED", funding: {} } as AdvanceRecord);
+    expect(
+      (await store.beginRepayment(record.advanceId, "ub_rp_store_12345678", "token-hash")).acquired
+    ).toBe(true);
+    expect(
+      (await store.beginRepayment(record.advanceId, "ub_rp_store_12345678", "token-hash")).acquired
+    ).toBe(false);
+    await expect(
+      store.beginRepayment(record.advanceId, "ub_rp_store_87654321", "token-hash")
+    ).rejects.toThrow("REPAYMENT_ALREADY_PENDING");
+  });
+
+  it("never retries a repayment that requires reconciliation", async () => {
+    const store = new MemoryAdvanceStore();
+    await store.reserve({ ...record, state: "FUNDED", funding: {} } as AdvanceRecord);
+    await store.beginRepayment(record.advanceId, "ub_rp_store_review_123", "token-hash");
+    await store.failRepayment(record.advanceId, "HEDERA_REPAYMENT_SETTLEMENT_FAILED");
+    await expect(
+      store.beginRepayment(record.advanceId, "ub_rp_store_review_123", "token-hash")
+    ).rejects.toThrow("REPAYMENT_REVIEW_REQUIRED");
+    expect((await store.get(record.advanceId))?.state).toBe("REPAYMENT_REVIEW_REQUIRED");
   });
 });

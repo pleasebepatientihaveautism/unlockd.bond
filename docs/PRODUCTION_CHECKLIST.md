@@ -15,8 +15,9 @@
 - [ ] `.env` is not tracked
 - [ ] commitment and confirmation secrets are independent and at least 32 bytes
 - [ ] 0G runtime receives an inference key, not a management key
-- [ ] pool association key is absent from runtime
-- [ ] Hedera operator, treasury, and supply roles are reviewed
+- [ ] pool key is available only to the bounded signer and cannot authorize
+      unrelated account actions
+- [ ] Hedera operator, treasury, pool, and supply roles are reviewed
 - [ ] deployed key material comes from a secret manager
 - [ ] logs and APM payload capture are verified body-free
 
@@ -28,6 +29,9 @@
 - [ ] stale, paused, indexing-error, and insufficient-sample cases fail closed
 - [ ] Hedera topic, token, treasury, pool association, and balances are valid
 - [ ] one atomic Demo USDC + NFT transfer reaches consensus `SUCCESS`
+- [ ] one full repayment returns exact Demo USDC, returns and burns the expected
+      NFT serial, and writes both repayment HCS messages
+- [ ] repayment replay and ambiguous-settlement tests fail closed
 - [ ] Mirror Node shows the payment, NFT owner, and HCS messages
 
 ## Runtime

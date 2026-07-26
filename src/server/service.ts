@@ -17,6 +17,7 @@ import {
 import type {
   AdvanceRequest,
   AssetSymbol,
+  FundingResultV2,
   MarketSnapshot,
   PrivateCompanyListing
 } from "../domain/schemas.js";
@@ -46,6 +47,10 @@ function confirmationToken(requestId: string, secret: string): string {
 function safeFailureCode(error: unknown): string {
   if (error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message)) {
     return error.message;
+  }
+  if (error && typeof error === "object" && "status" in error) {
+    const status = String(error.status);
+    if (/^[A-Z][A-Z0-9_]{2,80}$/.test(status)) return `HEDERA_${status}`;
   }
   return "PARTNER_OPERATION_FAILED";
 }
@@ -153,6 +158,9 @@ export class UnlockdBondService {
       authorization,
       funding: null,
       fundingProgress: null,
+      repayment: null,
+      repaymentProgress: null,
+      repaymentId: null,
       failureCode: null
     };
     const reserved = await this.deps.store.reserve(record);
@@ -208,14 +216,91 @@ export class UnlockdBondService {
       const completed = await this.deps.store.completeFunding(advanceId, result);
       return { advance: toCustomerAdvance(completed), idempotentReplay: false };
     } catch (error) {
-      await this.deps.store.failFunding(advanceId, safeFailureCode(error));
-      throw error;
+      const failureCode = safeFailureCode(error);
+      await this.deps.store.failFunding(advanceId, failureCode);
+      throw failureCode === "PARTNER_OPERATION_FAILED" ? error : new Error(failureCode);
+    }
+  }
+
+  async repay(
+    advanceId: string,
+    repaymentId: string,
+    token: string
+  ): Promise<{
+    advance: CustomerAdvance;
+    idempotentReplay: boolean;
+  }> {
+    const digest = confirmationDigest(token, this.deps.config.CONFIRMATION_SECRET);
+    const begun = await this.deps.store.beginRepayment(advanceId, repaymentId, digest);
+    if (!begun.acquired) {
+      return { advance: toCustomerAdvance(begun.record), idempotentReplay: true };
+    }
+    try {
+      const record = begun.record;
+      if (record.recipientAccountId !== this.deps.config.HEDERA_RECIPIENT_ID) {
+        throw new Error("REPAYMENT_PAYER_CONFIG_CHANGED");
+      }
+      const funding = record.funding;
+      if (!funding || !("version" in funding) || funding.version !== 2) {
+        throw new Error("REPAYMENT_REQUIRES_V2_RECEIPT");
+      }
+      const result = await this.deps.payment.repay(
+        this.repaymentPacket(record, funding, repaymentId),
+        async (progress) => {
+          await this.deps.store.recordRepaymentProgress(advanceId, progress);
+        }
+      );
+      if (
+        this.deps.config.mode !== "demo" &&
+        (result.simulated ||
+          !Object.values(result.transactions).every(
+            (transaction) => transaction.consensusStatus === "SUCCESS"
+          ))
+      ) {
+        throw new Error("HEDERA_REPAYMENT_CONSENSUS_SUCCESS_REQUIRED");
+      }
+      const completed = await this.deps.store.completeRepayment(advanceId, result);
+      return { advance: toCustomerAdvance(completed), idempotentReplay: false };
+    } catch (error) {
+      const failureCode = safeFailureCode(error);
+      await this.deps.store.failRepayment(advanceId, failureCode);
+      throw failureCode === "PARTNER_OPERATION_FAILED" ? error : new Error(failureCode);
     }
   }
 
   async get(advanceId: string): Promise<PublicAdvance | null> {
     const record = await this.deps.store.get(advanceId);
     return record ? toPublicAdvance(record) : null;
+  }
+
+  async payoff(advanceId: string) {
+    const record = await this.deps.store.get(advanceId);
+    if (!record) throw new Error("ADVANCE_NOT_FOUND");
+    if (
+      !["FUNDED", "REPAYMENT_PENDING", "REPAYMENT_REVIEW_REQUIRED", "REPAID"].includes(record.state)
+    ) {
+      throw new Error("ADVANCE_NOT_REPAYABLE");
+    }
+    const principalMinor = record.state === "REPAID" ? 0 : record.authorization.amountMinor;
+    return {
+      advanceId: record.advanceId,
+      state: record.state,
+      payerAccountId: record.recipientAccountId,
+      dueAt: new Date(
+        new Date(record.createdAt).getTime() + record.termDays * 24 * 60 * 60 * 1000
+      ).toISOString(),
+      principalMinor,
+      interestMinor: 0,
+      feesMinor: 0,
+      totalMinor: principalMinor,
+      amountUnits: principalMinor === 0 ? "0" : usdMinorToStableUnits(principalMinor).toString(),
+      asset: {
+        tokenId: this.deps.config.HEDERA_STABLE_TOKEN_ID ?? null,
+        symbol: "USDC",
+        decimals: 6,
+        label: "Demo USDC — no real value"
+      }
+    };
   }
 
   async readiness(): Promise<Record<string, boolean>> {
@@ -236,5 +321,18 @@ export class UnlockdBondService {
       recipient: advance.recipientAccountId,
       expiresAt: advance.expiresAt
     });
+  }
+
+  private repaymentPacket(record: AdvanceRecord, funding: FundingResultV2, repaymentId: string) {
+    return {
+      repaymentId,
+      advanceId: record.advanceId,
+      payerAccountId: record.recipientAccountId,
+      amountMinor: record.authorization.amountMinor,
+      amountStableUnits: usdMinorToStableUnits(record.authorization.amountMinor),
+      noteTokenId: funding.note.tokenId,
+      noteSerial: funding.note.serial,
+      issuanceSettlementTransactionId: funding.transactions.settlement.transactionId
+    };
   }
 }

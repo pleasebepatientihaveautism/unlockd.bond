@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { fundingResultV2Schema } from "../src/domain/schemas.js";
+import { fundingResultV2Schema, repaymentResultSchema } from "../src/domain/schemas.js";
 
 const baseUrl = process.env.UNLOCKD_API_URL ?? "http://localhost:3000";
 const operatorId = process.env.HEDERA_OPERATOR_ID;
@@ -79,6 +79,41 @@ if (
   throw new Error("REAL_CONSENSUS_RECEIPT_REQUIRED");
 }
 
+let repayment = null;
+if (process.argv.includes("--repay")) {
+  const repaymentId = `ub_rp_${crypto.randomUUID().replaceAll("-", "")}`;
+  const repaymentResponse = await fetch(
+    `${baseUrl}/api/advances/${encodeURIComponent(evaluated.advance.advanceId)}/repay`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": repaymentId
+      },
+      body: JSON.stringify({
+        repaymentId,
+        confirmationToken: evaluated.confirmationToken
+      })
+    }
+  );
+  const repaymentBody = (await repaymentResponse.json()) as {
+    advance?: { state: string; repayment: unknown };
+    error?: string;
+  };
+  if (!repaymentResponse.ok || repaymentBody.advance?.state !== "REPAID") {
+    throw new Error(repaymentBody.error ?? "DEMO_REPAYMENT_FAILED");
+  }
+  repayment = repaymentResultSchema.parse(repaymentBody.advance.repayment);
+  if (
+    repayment.simulated ||
+    !Object.values(repayment.transactions).every(
+      (transaction) => transaction.consensusStatus === "SUCCESS"
+    )
+  ) {
+    throw new Error("REAL_REPAYMENT_CONSENSUS_RECEIPT_REQUIRED");
+  }
+}
+
 const receipt = {
   network: "testnet",
   advanceId: evaluated.advance.advanceId,
@@ -86,8 +121,11 @@ const receipt = {
   amountMinor: funding.asset.amountMinor,
   amountStableUnits: funding.asset.amountUnits,
   funding,
+  repayment,
   generatedAt: new Date().toISOString()
 };
 const outputPath = path.resolve("hedera-demo-receipt.json");
 writeFileSync(outputPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
-process.stdout.write(`Real Testnet demo funded. Public receipt: ${path.basename(outputPath)}.\n`);
+process.stdout.write(
+  `Real Testnet demo ${repayment ? "funded and repaid" : "funded"}. Public receipt: ${path.basename(outputPath)}.\n`
+);
