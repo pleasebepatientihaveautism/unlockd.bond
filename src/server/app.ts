@@ -83,14 +83,45 @@ function isSettlementMutation(request: Request): boolean {
   );
 }
 
-function settlementAuthorized(config: AppConfig, authorization: string | undefined): boolean {
+function sessionCookie(request: Request): string | undefined {
+  return request.headers.cookie
+    ?.split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith("unlockd_session="))
+    ?.slice("unlockd_session=".length);
+}
+
+function hasRouteSettlementCredential(request: Request): boolean {
+  const requestPath = request.originalUrl.split("?")[0];
+  if (/^\/api\/advances\/[^/]+\/(?:fund|repay)$/.test(requestPath)) {
+    const confirmationToken =
+      request.body && typeof request.body === "object"
+        ? (request.body as Record<string, unknown>).confirmationToken
+        : null;
+    return (
+      typeof confirmationToken === "string" &&
+      confirmationToken.length >= 32 &&
+      confirmationToken.length <= 300
+    );
+  }
+  if (/^\/api\/positions\/[^/]+\/(?:repay|liquidate)$/.test(requestPath)) {
+    const cookie = sessionCookie(request);
+    return Boolean(cookie && /^[a-zA-Z0-9_-]{32,200}$/.test(cookie));
+  }
+  return false;
+}
+
+function settlementAuthorized(config: AppConfig, request: Request): boolean {
   if (config.mode === "demo") return true;
   const expected = config.SETTLEMENT_AUTH_SECRET;
+  const authorization = request.header("authorization");
   const presented = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!expected || !presented) return false;
-  const expectedDigest = createHash("sha256").update(expected).digest();
-  const presentedDigest = createHash("sha256").update(presented).digest();
-  return timingSafeEqual(expectedDigest, presentedDigest);
+  if (expected && presented) {
+    const expectedDigest = createHash("sha256").update(expected).digest();
+    const presentedDigest = createHash("sha256").update(presented).digest();
+    if (timingSafeEqual(expectedDigest, presentedDigest)) return true;
+  }
+  return hasRouteSettlementCredential(request);
 }
 
 export function createApp(deps: AppDependencies) {
@@ -115,16 +146,12 @@ export function createApp(deps: AppDependencies) {
   );
   app.use(express.json({ limit: "32kb", strict: true }));
   app.use((request, response, next) => {
-    const sessionCookie = request.headers.cookie
-      ?.split(";")
-      .map((value) => value.trim())
-      .find((value) => value.startsWith("unlockd_session="))
-      ?.slice("unlockd_session=".length);
+    const existingSessionCookie = sessionCookie(request);
     const sessionId =
-      sessionCookie && /^[a-zA-Z0-9_-]{32,200}$/.test(sessionCookie)
-        ? sessionCookie
+      existingSessionCookie && /^[a-zA-Z0-9_-]{32,200}$/.test(existingSessionCookie)
+        ? existingSessionCookie
         : randomBytes(32).toString("base64url");
-    if (!sessionCookie) {
+    if (!existingSessionCookie) {
       const secure = deps.config.NODE_ENV === "production" ? "; Secure" : "";
       response.setHeader(
         "Set-Cookie",
@@ -169,10 +196,7 @@ export function createApp(deps: AppDependencies) {
     return next();
   });
   app.use("/api", (request, _response, next) => {
-    if (
-      isSettlementMutation(request) &&
-      !settlementAuthorized(deps.config, request.header("authorization"))
-    ) {
+    if (isSettlementMutation(request) && !settlementAuthorized(deps.config, request)) {
       return next(new Error("SETTLEMENT_AUTH_REQUIRED"));
     }
     return next();

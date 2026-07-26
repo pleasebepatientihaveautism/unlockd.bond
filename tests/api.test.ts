@@ -48,6 +48,10 @@ describe("HTTP API", () => {
       .set("Authorization", `Bearer ${settlementSecret}`)
       .send({})
       .expect(422);
+    await request(server)
+      .post("/api/advances/ub_test/fund")
+      .send({ confirmationToken: "route-confirmation-capability-at-least-thirty-two-characters" })
+      .expect(404, { error: "ADVANCE_NOT_FOUND" });
   });
 
   it("serves liveness and readiness without secrets", async () => {
