@@ -220,7 +220,7 @@ const rows: SeedRow[] = [
 ];
 
 function valuationUsd(value: string): number {
-  const suffix = value.at(-1);
+  const suffix = value[value.length - 1];
   const multiplier = suffix === "B" ? 1_000_000_000 : suffix === "M" ? 1_000_000 : 1;
   return Number.parseFloat(multiplier === 1 ? value : value.slice(0, -1)) * multiplier;
 }
